@@ -102,28 +102,57 @@ def create_sample_data():
     """Create sample data for testing without OCR processing"""
     logging.info("Creating sample data for testing")
     
-    # Generate sample data
+    # Generate sample data based on real format from IMG_6560.png
     sample_data = [
         {
-            'item_number': '12345678',
-            'price': '99.99',
-            'date': '04/17/25',
-            'time': '14:30:00',
-            'description': 'Sample Item 1'
+            'item_number': '1835592',
+            'price': '29.97',
+            'period': 'P08',
+            'quantity': 3,
+            'exception': '',
+            'date': '08/17/25',
+            'time': '',
+            'description': 'Refund item 1835592'
         },
         {
-            'item_number': '87654321',
-            'price': '149.99',
-            'date': '04/17/25',
-            'time': '14:35:00',
-            'description': 'Sample Item 2'
+            'item_number': '1537629',
+            'price': '69.97',
+            'period': 'P08',
+            'quantity': 3,
+            'exception': '',
+            'date': '08/17/25',
+            'time': '',
+            'description': 'Refund item 1537629'
         },
         {
-            'item_number': '11223344',
-            'price': '49.99',
-            'date': '04/17/25',
-            'time': '14:40:00',
-            'description': 'Sample Item 3'
+            'item_number': '1646572',
+            'price': '25.98',
+            'period': 'P09',
+            'quantity': 2,
+            'exception': '',
+            'date': '09/17/25',
+            'time': '',
+            'description': 'Refund item 1646572'
+        },
+        {
+            'item_number': '1645730',
+            'price': '99.98',
+            'period': 'P09',
+            'quantity': 2,
+            'exception': '',
+            'date': '09/17/25',
+            'time': '',
+            'description': 'Refund item 1645730'
+        },
+        {
+            'item_number': '1641529',
+            'price': '29.98',
+            'period': 'P09',
+            'quantity': 2,
+            'exception': '',
+            'date': '09/17/25',
+            'time': '',
+            'description': 'Refund item 1641529'
         }
     ]
     
@@ -138,10 +167,13 @@ def create_sample_data():
             session_id=session_id,
             item_number=item.get('item_number', ''),
             price=item.get('price', ''),
+            period=item.get('period', 'P04'),
+            exception=item.get('exception', ''),
+            quantity=item.get('quantity', 1),
+            additional_info=item.get('additional_info', ''),
             original_description=item.get('description', ''),
             original_date=item.get('date', ''),
-            original_time=item.get('time', ''),
-            period=f"P{item.get('date', '').split('/')[0].zfill(2)}" if item.get('date', '') and '/' in item.get('date', '') else "P04"
+            original_time=item.get('time', '')
         )
         db.session.add(report_item)
     db.session.commit()

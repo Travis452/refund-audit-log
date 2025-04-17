@@ -40,42 +40,46 @@ def export_to_excel(data):
             # Item number
             ws.cell(row=row_num, column=1).value = item.get('item_number', '')
             
-            # Exceptions (placeholder - can be empty)
-            ws.cell(row=row_num, column=2).value = ""
+            # Exceptions (use the exception field if available)
+            ws.cell(row=row_num, column=2).value = item.get('exception', '')
             
-            # Quantity (default to 1 if not specified)
-            ws.cell(row=row_num, column=3).value = 1
+            # Quantity (use the quantity field if available, default to 1)
+            qty = int(item.get('quantity', 1))
+            ws.cell(row=row_num, column=3).value = qty
             
-            # Total Sell (Price)
+            # Total Sell (Price) - If we have quantity > 1, this should be the total amount
             price_cell = ws.cell(row=row_num, column=4)
             price_str = item.get('price', '0.00')
             try:
                 # Try to convert to float for proper formatting
                 price_val = float(price_str)
+                # If price is per-item and quantity > 1, calculate total
                 price_cell.value = price_val
                 price_cell.number_format = '$#,##0.00'
             except ValueError:
                 price_cell.value = price_str
             
-            # Period (P08, P09, etc. - can use a placeholder or extract from date)
-            date_str = item.get('date', '')
-            period = "P00"  # Default
-            if date_str:
-                try:
-                    # Try to extract month from date and convert to period
-                    if '/' in date_str:
-                        month = date_str.split('/')[0]
-                        if month.isdigit():
-                            period = f"P{month.zfill(2)}"
-                except Exception:
-                    pass
+            # Period (use the period field if available, or extract from date)
+            period = item.get('period', '')
+            if not period:
+                date_str = item.get('date', '')
+                period = "P00"  # Default
+                if date_str:
+                    try:
+                        # Try to extract month from date and convert to period
+                        if '/' in date_str:
+                            month = date_str.split('/')[0]
+                            if month.isdigit():
+                                period = f"P{month.zfill(2)}"
+                    except Exception:
+                        pass
             ws.cell(row=row_num, column=5).value = period
             
-            # Second Exceptions column (placeholder)
-            ws.cell(row=row_num, column=6).value = ""
+            # Second Exceptions column (same as first)
+            ws.cell(row=row_num, column=6).value = item.get('exception', '')
             
             # Second Qty column (same as first)
-            ws.cell(row=row_num, column=7).value = 1
+            ws.cell(row=row_num, column=7).value = qty
         
         # Add totals row if there is data
         if len(data) > 0:
@@ -189,14 +193,15 @@ def export_to_google_sheets(data):
                     pass
             
             # Create row with proper format
+            qty = int(item.get('quantity', 1))
             row = [
-                item.get('item_number', ''),  # Item #
-                "",                          # Exceptions
-                1,                           # Qty
-                item.get('price', '0.00'),   # Total Sell
-                period,                      # Period
-                "",                          # Exceptions
-                1                            # Qty
+                item.get('item_number', ''),   # Item #
+                item.get('exception', ''),     # Exceptions
+                qty,                           # Qty
+                item.get('price', '0.00'),     # Total Sell
+                item.get('period', period),    # Period (use provided period or fallback to date-derived)
+                item.get('exception', ''),     # Exceptions (same as first)
+                qty                            # Qty (same as first)
             ]
             rows.append(row)
         
