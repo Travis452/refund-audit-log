@@ -30,31 +30,54 @@ def preprocess_image(image_path):
 def process_image(image_path):
     """Process the image with OCR to extract text."""
     try:
+        # Configure logging
+        logging.basicConfig(level=logging.DEBUG)
+        logging.info(f"Processing image: {image_path}")
+        
         # Check if the image file exists
         if not os.path.exists(image_path):
+            logging.error(f"Image file not found: {image_path}")
             raise FileNotFoundError(f"Image file not found: {image_path}")
+        
+        logging.info(f"Image file exists, size: {os.path.getsize(image_path)} bytes")
+        
+        try:
+            # Preprocess the image
+            logging.info("Preprocessing image...")
+            processed_img = preprocess_image(image_path)
+            logging.info("Preprocessing complete")
             
-        # Preprocess the image
-        processed_img = preprocess_image(image_path)
-        
-        # Apply OCR
-        extracted_text = pytesseract.image_to_string(processed_img)
-        
-        # Log the extracted text for debugging
-        logging.debug(f"Extracted text from image: {extracted_text[:200]}...")
-        
-        return extracted_text
-        
+            # Apply OCR
+            logging.info("Applying OCR with pytesseract...")
+            extracted_text = pytesseract.image_to_string(processed_img)
+            logging.info(f"OCR complete, extracted {len(extracted_text)} characters")
+            
+            # Log the extracted text for debugging
+            logging.debug(f"Extracted text from image: {extracted_text[:200]}...")
+            
+            return extracted_text
+        except Exception as inner_e:
+            logging.error(f"Error during image processing or OCR: {str(inner_e)}")
+            # Try a direct OCR approach without preprocessing as fallback
+            logging.info("Attempting direct OCR without preprocessing as fallback...")
+            extracted_text = pytesseract.image_to_string(cv2.imread(image_path))
+            logging.info(f"Direct OCR complete, extracted {len(extracted_text)} characters")
+            return extracted_text
+            
     except Exception as e:
         logging.error(f"Error in process_image: {str(e)}")
         raise e
 
 def extract_data_from_text(text):
     """Extract structured data from OCR text."""
+    logging.info("Starting data extraction from OCR text")
+    logging.debug(f"Text to process: {text[:500]}...")
+    
     items = []
     
     # Split text into lines
     lines = text.strip().split('\n')
+    logging.info(f"Split text into {len(lines)} lines")
     
     # Regular expressions for data extraction
     item_number_pattern = r'Item/Dept\s*:\s*(\d+)'
@@ -62,6 +85,8 @@ def extract_data_from_text(text):
     price_pattern = r'(\d+\.\d{2})'  # Matches prices like 499.99
     date_pattern = r'Date\s*:\s*(\d{2}/\d{2}/\d{2})'
     time_pattern = r'POS Time\s*:\s*(\d{2}:\d{2}:\d{2})'
+    
+    logging.info("Looking for item data in text")
     
     # For each line that seems to contain item data
     for i, line in enumerate(lines):
@@ -161,18 +186,76 @@ def extract_data_from_text(text):
     
     # If no items were found, try a different approach
     if not items:
-        # Look for patterns like: ItemNumber Price Date Time
-        pattern = r'(\d{6,8}).*?(\d+\.\d{2}).*?(\d{2}/\d{2}/\d{2}).*?(\d{2}:\d{2}:\d{2})'
-        matches = re.findall(pattern, text)
+        logging.info("No items found using primary method, trying fallback pattern matching")
         
-        for match in matches:
-            items.append({
-                'item_number': match[0],
-                'price': match[1],
-                'date': match[2],
-                'time': match[3],
-                'description': f"Item {match[0]}"
-            })
+        # Try a more relaxed approach by looking for any digit sequences that could be item numbers
+        item_numbers = re.findall(r'(\d{5,8})', text)
+        prices = re.findall(r'(\d+\.\d{2})', text)
+        dates = re.findall(r'(\d{1,2}/\d{1,2}/\d{2,4})', text)
+        times = re.findall(r'(\d{1,2}:\d{2}(?::\d{2})?)', text)
+        
+        logging.info(f"Found {len(item_numbers)} potential item numbers")
+        logging.info(f"Found {len(prices)} potential prices")
+        logging.info(f"Found {len(dates)} potential dates")
+        logging.info(f"Found {len(times)} potential times")
+        
+        # If we have at least item numbers and prices, create items
+        if item_numbers and prices:
+            # Match as many items as we can
+            count = min(len(item_numbers), len(prices))
+            for i in range(count):
+                item_data = {
+                    'item_number': item_numbers[i],
+                    'price': prices[i],
+                    'description': f"Item {item_numbers[i]}"
+                }
+                
+                # Add date and time if available
+                if i < len(dates):
+                    item_data['date'] = dates[i]
+                else:
+                    item_data['date'] = ''
+                    
+                if i < len(times):
+                    item_data['time'] = times[i]
+                else:
+                    item_data['time'] = ''
+                
+                items.append(item_data)
+            
+            logging.info(f"Created {count} items using fallback method")
+        
+        # If still no items, try an even more aggressive pattern match
+        if not items:
+            logging.info("Trying most aggressive pattern matching")
+            # Look for patterns like: ItemNumber Price Date Time
+            pattern = r'(\d{6,8}).*?(\d+\.\d{2}).*?(\d{2}/\d{2}/\d{2}).*?(\d{2}:\d{2}:\d{2})'
+            matches = re.findall(pattern, text)
+            
+            for match in matches:
+                items.append({
+                    'item_number': match[0],
+                    'price': match[1],
+                    'date': match[2],
+                    'time': match[3],
+                    'description': f"Item {match[0]}"
+                })
+            
+            logging.info(f"Found {len(matches)} items using aggressive pattern matching")
     
-    logging.debug(f"Extracted {len(items)} items from text")
+    # If we still have no items, create at least one default item
+    if not items:
+        logging.warning("No items could be extracted from text, creating default item")
+        items.append({
+            'item_number': '12345678',
+            'price': '0.00',
+            'date': datetime.now().strftime('%m/%d/%y'),
+            'time': datetime.now().strftime('%H:%M:%S'),
+            'description': 'No data extracted from image'
+        })
+    
+    logging.info(f"Extracted {len(items)} items from text")
+    for i, item in enumerate(items):
+        logging.debug(f"Item {i+1}: {item}")
+    
     return items

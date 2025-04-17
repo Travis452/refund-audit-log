@@ -33,29 +33,38 @@ def index():
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
+    logging.info("Upload endpoint called")
     if 'file' not in request.files:
+        logging.warning("No file part in the request")
         flash('No file part', 'danger')
         return redirect(request.url)
     
     file = request.files['file']
     if file.filename == '':
+        logging.warning("Empty filename submitted")
         flash('No selected file', 'danger')
         return redirect(request.url)
+    
+    logging.info(f"File uploaded: {file.filename}")
     
     if file and allowed_file(file.filename):
         # Create a unique filename to avoid collisions
         filename = str(uuid.uuid4()) + secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
+        logging.info(f"Saved file to {filepath}")
         
         try:
             # Process the image with OCR
+            logging.info("Starting OCR processing")
             extracted_text = process_image(filepath)
             extracted_data = extract_data_from_text(extracted_text)
+            logging.info(f"OCR processing complete, extracted {len(extracted_data)} items")
             
             # Generate a session ID for this batch of data
             session_id = str(uuid.uuid4())
             session['session_id'] = session_id
+            logging.info(f"Generated session ID: {session_id}")
             
             # Save to database
             for item in extracted_data:
@@ -71,6 +80,7 @@ def upload_file():
                 )
                 db.session.add(report_item)
             db.session.commit()
+            logging.info(f"Saved {len(extracted_data)} items to database")
             
             # Store extracted data in session for later use
             session['extracted_data'] = extracted_data
@@ -83,8 +93,65 @@ def upload_file():
             flash(f'Error processing image: {str(e)}', 'danger')
             return redirect(url_for('index'))
     else:
+        logging.warning(f"Invalid file type: {file.filename}")
         flash('File type not allowed. Please upload a valid image (png, jpg, jpeg, gif, bmp, tiff).', 'warning')
         return redirect(url_for('index'))
+
+@app.route('/sample')
+def create_sample_data():
+    """Create sample data for testing without OCR processing"""
+    logging.info("Creating sample data for testing")
+    
+    # Generate sample data
+    sample_data = [
+        {
+            'item_number': '12345678',
+            'price': '99.99',
+            'date': '04/17/25',
+            'time': '14:30:00',
+            'description': 'Sample Item 1'
+        },
+        {
+            'item_number': '87654321',
+            'price': '149.99',
+            'date': '04/17/25',
+            'time': '14:35:00',
+            'description': 'Sample Item 2'
+        },
+        {
+            'item_number': '11223344',
+            'price': '49.99',
+            'date': '04/17/25',
+            'time': '14:40:00',
+            'description': 'Sample Item 3'
+        }
+    ]
+    
+    # Generate a session ID for this batch of data
+    session_id = str(uuid.uuid4())
+    session['session_id'] = session_id
+    logging.info(f"Generated session ID for sample data: {session_id}")
+    
+    # Save to database
+    for item in sample_data:
+        report_item = ReportItem(
+            session_id=session_id,
+            item_number=item.get('item_number', ''),
+            price=item.get('price', ''),
+            original_description=item.get('description', ''),
+            original_date=item.get('date', ''),
+            original_time=item.get('time', ''),
+            period=f"P{item.get('date', '').split('/')[0].zfill(2)}" if item.get('date', '') and '/' in item.get('date', '') else "P04"
+        )
+        db.session.add(report_item)
+    db.session.commit()
+    logging.info(f"Saved {len(sample_data)} sample items to database")
+    
+    # Store extracted data in session for later use
+    session['extracted_data'] = sample_data
+    
+    flash('Sample data created successfully.', 'success')
+    return redirect(url_for('show_results'))
 
 @app.route('/results')
 def show_results():
