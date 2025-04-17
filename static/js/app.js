@@ -147,13 +147,26 @@ document.addEventListener('DOMContentLoaded', function() {
                     const message = document.getElementById('export-message');
                     const link = document.getElementById('export-link');
                     
-                    message.textContent = 'Data exported to Google Sheets! ';
-                    link.href = data.spreadsheet_url;
-                    link.textContent = 'Open Google Sheets';
-                    alertBox.style.display = 'block';
+                    // Check if this was a fallback to Excel
+                    if (data.fallback) {
+                        message.textContent = 'Exported to Excel (Google Sheets not available): ';
+                        link.href = data.download_url;
+                        link.textContent = 'Download Excel File';
+                        showAlert('warning', data.fallback_message);
+                        
+                        // Auto download the Excel file
+                        window.location.href = data.download_url;
+                    } else {
+                        // Normal Google Sheets export
+                        message.textContent = 'Data exported to Google Sheets! ';
+                        link.href = data.spreadsheet_url;
+                        link.textContent = 'Open Google Sheets';
+                        
+                        // Open in new tab
+                        window.open(data.spreadsheet_url, '_blank');
+                    }
                     
-                    // Open in new tab
-                    window.open(data.spreadsheet_url, '_blank');
+                    alertBox.style.display = 'block';
                 } else {
                     showAlert('danger', 'Export failed: ' + data.message);
                 }

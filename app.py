@@ -235,13 +235,37 @@ def export_data():
             return jsonify({"success": True, "download_url": url_for('download_file', filename=os.path.basename(download_path))})
             
         elif export_type == 'google':
-            spreadsheet_url = export_to_google_sheets(data)
-            export_file.sheet_url = spreadsheet_url
-            db.session.add(export_file)
-            db.session.commit()
-            
-            flash('Data exported to Google Sheets successfully.', 'success')
-            return jsonify({"success": True, "spreadsheet_url": spreadsheet_url})
+            try:
+                spreadsheet_url = export_to_google_sheets(data)
+                export_file.sheet_url = spreadsheet_url
+                db.session.add(export_file)
+                db.session.commit()
+                
+                flash('Data exported to Google Sheets successfully.', 'success')
+                return jsonify({"success": True, "spreadsheet_url": spreadsheet_url})
+            except ValueError as google_error:
+                if "credentials not found" in str(google_error).lower():
+                    # Google credentials are missing - inform the user and offer Excel as alternative
+                    logging.warning("Google Sheets export failed due to missing credentials, falling back to Excel")
+                    flash('Google Sheets export requires credentials. Exporting to Excel instead.', 'warning')
+                    
+                    # Fall back to Excel export
+                    download_path = export_to_excel(data)
+                    export_file.export_type = 'excel'  # Update the export type
+                    export_file.file_path = download_path
+                    export_file.filename = os.path.basename(download_path)
+                    db.session.add(export_file)
+                    db.session.commit()
+                    
+                    return jsonify({
+                        "success": True, 
+                        "download_url": url_for('download_file', filename=os.path.basename(download_path)),
+                        "fallback": True,
+                        "fallback_message": "Exported to Excel instead of Google Sheets due to missing credentials."
+                    })
+                else:
+                    # Other Google Sheets error
+                    raise
             
         else:
             flash('Invalid export type.', 'danger')

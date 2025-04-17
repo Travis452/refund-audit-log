@@ -96,14 +96,17 @@ def export_to_excel(data):
             ws.cell(row=total_row, column=7).value = f"=SUM(C{start_row}:C{total_row-1})"
         
         # Auto-adjust column widths
-        for col in ws.columns:
+        for i, col in enumerate(ws.columns, 1):
             max_length = 0
-            column = col[0].column_letter
+            column_letter = openpyxl.utils.get_column_letter(i)
             for cell in col:
                 if cell.value:
-                    max_length = max(max_length, len(str(cell.value)))
+                    try:
+                        max_length = max(max_length, len(str(cell.value)))
+                    except:
+                        pass
             adjusted_width = max(max_length, 10) + 2
-            ws.column_dimensions[column].width = adjusted_width
+            ws.column_dimensions[column_letter].width = adjusted_width
         
         # Make sure export directory exists
         export_dir = os.path.join('/tmp', 'exports')
