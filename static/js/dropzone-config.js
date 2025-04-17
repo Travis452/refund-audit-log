@@ -20,6 +20,25 @@ document.addEventListener('DOMContentLoaded', function() {
             // When the button is clicked, process the queue
             submitButton.addEventListener("click", function() {
                 if (myDropzone.getQueuedFiles().length > 0) {
+                    // Show loading indicator
+                    submitButton.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Processing...';
+                    submitButton.disabled = true;
+                    
+                    // Add a loading overlay to the page
+                    const loadingOverlay = document.createElement('div');
+                    loadingOverlay.className = 'loading-overlay';
+                    loadingOverlay.innerHTML = `
+                        <div class="loading-content">
+                            <div class="spinner-border text-light mb-3" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <h5 class="text-light">Processing Image...</h5>
+                            <p class="text-light-emphasis">Please wait while we extract data from your image</p>
+                        </div>
+                    `;
+                    document.body.appendChild(loadingOverlay);
+                    
+                    // Process the queue
                     myDropzone.processQueue();
                 } else {
                     // If no files are in the queue, show an alert
@@ -34,6 +53,17 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // Show error message on upload error
             this.on("error", function(file, errorMessage, xhr) {
+                // Remove loading overlay
+                const overlay = document.querySelector('.loading-overlay');
+                if (overlay) {
+                    overlay.remove();
+                }
+                
+                // Reset button
+                const submitButton = document.getElementById("submit-upload");
+                submitButton.innerHTML = '<i class="fas fa-upload me-2"></i>Process Image';
+                submitButton.disabled = false;
+                
                 if (typeof errorMessage === "string") {
                     showAlert("danger", "Error: " + errorMessage);
                 } else {
