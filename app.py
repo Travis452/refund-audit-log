@@ -279,7 +279,13 @@ def export_data():
 
 @app.route('/download/<filename>')
 def download_file(filename):
-    return send_from_directory(directory=os.path.join('/tmp', 'exports'), filename=filename, as_attachment=True)
+    # Check the version of Flask to determine the correct parameters
+    try:
+        # For newer versions of Flask
+        return send_from_directory(os.path.join('/tmp', 'exports'), filename, as_attachment=True)
+    except TypeError:
+        # For older versions that expect 'directory' parameter
+        return send_from_directory(directory=os.path.join('/tmp', 'exports'), filename=filename, as_attachment=True)
 
 @app.route('/history')
 def export_history():
