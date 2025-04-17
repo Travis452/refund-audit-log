@@ -1,15 +1,16 @@
 import os
 import uuid
 import logging
-from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session, send_from_directory
+from flask import render_template, request, redirect, url_for, flash, jsonify, session, send_from_directory
 from werkzeug.utils import secure_filename
 import json
+from datetime import datetime
+
+# Import from main.py where app is created
+from main import app, db
+from models import ReportItem, ExportFile
 from ocr_processor import process_image, extract_data_from_text
 from data_exporter import export_to_excel, export_to_google_sheets
-
-# Initialize Flask app
-app = Flask(__name__)
-app.secret_key = os.environ.get("SESSION_SECRET", "default-dev-secret-key")
 
 # Configure upload folder
 UPLOAD_FOLDER = '/tmp/uploads'
@@ -26,7 +27,9 @@ def allowed_file(filename):
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    # Get the 5 most recent exports to show in the UI
+    recent_exports = ExportFile.query.order_by(ExportFile.created_at.desc()).limit(5).all()
+    return render_template('index.html', recent_exports=recent_exports)
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -50,12 +53,32 @@ def upload_file():
             extracted_text = process_image(filepath)
             extracted_data = extract_data_from_text(extracted_text)
             
+            # Generate a session ID for this batch of data
+            session_id = str(uuid.uuid4())
+            session['session_id'] = session_id
+            
+            # Save to database
+            for item in extracted_data:
+                report_item = ReportItem(
+                    session_id=session_id,
+                    item_number=item.get('item_number', ''),
+                    price=item.get('price', ''),
+                    original_description=item.get('description', ''),
+                    original_date=item.get('date', ''),
+                    original_time=item.get('time', ''),
+                    # Try to determine period from date
+                    period=f"P{item.get('date', '').split('/')[0].zfill(2)}" if item.get('date', '') and '/' in item.get('date', '') else "P00"
+                )
+                db.session.add(report_item)
+            db.session.commit()
+            
             # Store extracted data in session for later use
             session['extracted_data'] = extracted_data
             session['image_path'] = filepath
             
             return redirect(url_for('show_results'))
         except Exception as e:
+            db.session.rollback()
             logging.error(f"Error processing image: {str(e)}")
             flash(f'Error processing image: {str(e)}', 'danger')
             return redirect(url_for('index'))
@@ -77,8 +100,36 @@ def update_data():
     try:
         updated_data = request.json
         session['extracted_data'] = updated_data
+        
+        # Get session ID
+        session_id = session.get('session_id')
+        if not session_id:
+            return jsonify({"success": False, "message": "Session ID not found. Please upload an image first."})
+        
+        # Delete previous items for this session
+        ReportItem.query.filter_by(session_id=session_id).delete()
+        
+        # Add updated items to database
+        for item in updated_data:
+            report_item = ReportItem(
+                session_id=session_id,
+                item_number=item.get('item_number', ''),
+                price=item.get('price', ''),
+                period=item.get('period', 'P00'),
+                exception=item.get('exception', ''),
+                quantity=item.get('quantity', 1),
+                additional_info=item.get('time', ''),  # Store additional info from the time field
+                # Store original values for reference
+                original_description=item.get('description', ''),
+                original_date=item.get('date', ''),
+                original_time=item.get('time', '')
+            )
+            db.session.add(report_item)
+        
+        db.session.commit()
         return jsonify({"success": True, "message": "Data updated successfully"})
     except Exception as e:
+        db.session.rollback()
         logging.error(f"Error updating data: {str(e)}")
         return jsonify({"success": False, "message": f"Error: {str(e)}"})
 
@@ -86,25 +137,51 @@ def update_data():
 def export_data():
     export_type = request.form.get('export_type', 'excel')
     data = session.get('extracted_data', [])
+    session_id = session.get('session_id')
     
     if not data:
         flash('No data to export.', 'warning')
         return redirect(url_for('show_results'))
     
+    if not session_id:
+        flash('Session ID not found. Please upload an image first.', 'warning')
+        return redirect(url_for('index'))
+    
     try:
+        # Create export record
+        export_file = ExportFile(
+            session_id=session_id,
+            export_type=export_type,
+            item_count=len(data),
+            filename=f"refund_audit_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        )
+        
         if export_type == 'excel':
             download_path = export_to_excel(data)
+            export_file.file_path = download_path
+            export_file.filename = os.path.basename(download_path)
+            db.session.add(export_file)
+            db.session.commit()
+            
             flash('Data exported to Excel successfully.', 'success')
             # Return file download link
             return jsonify({"success": True, "download_url": url_for('download_file', filename=os.path.basename(download_path))})
+            
         elif export_type == 'google':
             spreadsheet_url = export_to_google_sheets(data)
+            export_file.sheet_url = spreadsheet_url
+            db.session.add(export_file)
+            db.session.commit()
+            
             flash('Data exported to Google Sheets successfully.', 'success')
             return jsonify({"success": True, "spreadsheet_url": spreadsheet_url})
+            
         else:
             flash('Invalid export type.', 'danger')
             return jsonify({"success": False, "message": "Invalid export type"})
+            
     except Exception as e:
+        db.session.rollback()
         logging.error(f"Error during export: {str(e)}")
         flash(f'Error exporting data: {str(e)}', 'danger')
         return jsonify({"success": False, "message": f"Error: {str(e)}"})
