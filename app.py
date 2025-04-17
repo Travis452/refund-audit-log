@@ -190,6 +190,12 @@ def export_data():
 def download_file(filename):
     return send_from_directory(directory=os.path.join('/tmp', 'exports'), filename=filename, as_attachment=True)
 
+@app.route('/history')
+def export_history():
+    # Get all exports ordered by most recent first
+    exports = ExportFile.query.order_by(ExportFile.created_at.desc()).all()
+    return render_template('history.html', exports=exports)
+
 # Error handlers
 @app.errorhandler(404)
 def page_not_found(e):
