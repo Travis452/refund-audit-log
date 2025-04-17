@@ -18,7 +18,7 @@
                 <!-- Header -->
                 <div class="d-flex justify-content-between align-items-center mb-4">
                     <div>
-                        <h1 class="h2 fw-bold">Extracted Report Data</h1>
+                        <h1 class="h2 fw-bold">REFUND AUDIT LOG</h1>
                         <p class="text-muted">Review and edit the extracted data before exporting</p>
                     </div>
                     <div>
@@ -66,11 +66,12 @@
                             <table class="table table-hover mb-0" id="extracted-data-table">
                                 <thead class="table-dark">
                                     <tr>
-                                        <th>Item Number</th>
-                                        <th>Description</th>
-                                        <th>Price</th>
-                                        <th>Date</th>
-                                        <th>Time</th>
+                                        <th>Item #</th>
+                                        <th>Exceptions</th>
+                                        <th>Qty</th>
+                                        <th>Total Sell</th>
+                                        <th>Period</th>
+                                        <th>Additional Info</th>
                                         <th class="text-center">Actions</th>
                                     </tr>
                                 </thead>
@@ -79,10 +80,17 @@
                                         {% for item in data %}
                                             <tr data-row-id="{{ loop.index }}">
                                                 <td><input type="text" class="form-control form-control-sm item-number" value="{{ item.item_number }}"></td>
-                                                <td><input type="text" class="form-control form-control-sm description" value="{{ item.description }}"></td>
+                                                <td><input type="text" class="form-control form-control-sm exception" value=""></td>
+                                                <td><input type="number" class="form-control form-control-sm quantity" value="1" min="1"></td>
                                                 <td><input type="text" class="form-control form-control-sm price" value="{{ item.price }}"></td>
-                                                <td><input type="text" class="form-control form-control-sm date" value="{{ item.date }}"></td>
-                                                <td><input type="text" class="form-control form-control-sm time" value="{{ item.time }}"></td>
+                                                <td>
+                                                    <select class="form-select form-select-sm period">
+                                                        {% for m in range(1, 13) %}
+                                                            <option value="P{{ '%02d' % m }}" {% if item.date and item.date.startswith(m|string ~ '/') %}selected{% endif %}>P{{ '%02d' % m }}</option>
+                                                        {% endfor %}
+                                                    </select>
+                                                </td>
+                                                <td><input type="text" class="form-control form-control-sm additional-info" value="{{ item.time|default('', true) }}"></td>
                                                 <td class="text-center">
                                                     <button class="btn btn-sm btn-danger delete-row-btn">
                                                         <i class="fas fa-trash"></i>
@@ -139,10 +147,17 @@
     <template id="row-template">
         <tr data-row-id="new">
             <td><input type="text" class="form-control form-control-sm item-number" value=""></td>
-            <td><input type="text" class="form-control form-control-sm description" value=""></td>
+            <td><input type="text" class="form-control form-control-sm exception" value=""></td>
+            <td><input type="number" class="form-control form-control-sm quantity" value="1" min="1"></td>
             <td><input type="text" class="form-control form-control-sm price" value=""></td>
-            <td><input type="text" class="form-control form-control-sm date" value=""></td>
-            <td><input type="text" class="form-control form-control-sm time" value=""></td>
+            <td>
+                <select class="form-select form-select-sm period">
+                    {% for m in range(1, 13) %}
+                        <option value="P{{ '%02d' % m }}">P{{ '%02d' % m }}</option>
+                    {% endfor %}
+                </select>
+            </td>
+            <td><input type="text" class="form-control form-control-sm additional-info" value=""></td>
             <td class="text-center">
                 <button class="btn btn-sm btn-danger delete-row-btn">
                     <i class="fas fa-trash"></i>

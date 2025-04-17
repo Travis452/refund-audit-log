@@ -38,12 +38,29 @@ document.addEventListener('DOMContentLoaded', function() {
             const data = [];
             
             rows.forEach(row => {
+                // Get period to convert to date format for backwards compatibility
+                const periodElement = row.querySelector('.period');
+                let period = "P00";
+                let dateValue = "";
+                
+                if (periodElement) {
+                    period = periodElement.value || "P00";
+                    // Extract the month number from the period (e.g., "P04" -> "04")
+                    const monthStr = period.substring(1);
+                    // Create a date string in MM/DD/YY format
+                    const currentYear = new Date().getFullYear().toString().substring(2);
+                    dateValue = `${monthStr}/01/${currentYear}`;
+                }
+                
                 const item = {
                     item_number: row.querySelector('.item-number').value,
-                    description: row.querySelector('.description').value,
+                    description: "Item " + row.querySelector('.item-number').value, // Description is now derived from item number
                     price: row.querySelector('.price').value,
-                    date: row.querySelector('.date').value,
-                    time: row.querySelector('.time').value
+                    date: dateValue,
+                    time: row.querySelector('.additional-info') ? row.querySelector('.additional-info').value : "",
+                    exception: row.querySelector('.exception') ? row.querySelector('.exception').value : "",
+                    quantity: row.querySelector('.quantity') ? row.querySelector('.quantity').value : 1,
+                    period: period
                 };
                 data.push(item);
             });
