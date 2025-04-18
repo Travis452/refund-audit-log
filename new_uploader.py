@@ -87,6 +87,40 @@ def process_receipt_image(file, app, temp_dir="/tmp"):
             except Exception as ai_error:
                 logger.error(f"AI extraction error: {str(ai_error)}")
             
+            # Try using the trained model first if available
+            try:
+                logger.info("Attempting trained model extraction...")
+                if os.path.exists('trained_item_locations.json'):
+                    trained_results = process_with_training(filepath)
+                    
+                    if trained_results and len(trained_results) > 0:
+                        logger.info(f"Trained model extraction found {len(trained_results)} items")
+                        
+                        # Process and format the trained extraction results
+                        processed_data = []
+                        current_month = int(os.popen('date +%m').read().strip())
+                        period = f"P{current_month:02d}"
+                        
+                        for item in trained_results:
+                            item_data = {
+                                'item_number': item.get('item_number', ''),
+                                'price': item.get('price', '0.00'),
+                                'period': period,
+                                'date': item.get('date', ''),
+                                'time': item.get('time', ''),
+                                'description': item.get('description', ''),
+                                'quantity': 1,
+                                'exception': ''
+                            }
+                            processed_data.append(item_data)
+                        
+                        signal.alarm(0)  # Cancel timeout
+                        return True, processed_data
+                else:
+                    logger.info("No training data found, skipping trained model extraction")
+            except Exception as trained_error:
+                logger.error(f"Trained model extraction error: {str(trained_error)}")
+            
             # Next try direct item number extraction method
             logger.info("Attempting direct item number extraction...")
             direct_results = extract_item_numbers_direct(filepath)
