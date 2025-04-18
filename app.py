@@ -95,24 +95,14 @@ def upload_file():
             item_numbers = list(dict.fromkeys(filtered_matches))
             logging.info(f"Extracted {len(item_numbers)} potential item numbers: {item_numbers}")
             
-            # Make sure we have the known item numbers we want
-            known_item_numbers = ['9900099', '1806281', '1839592', '7276736', '7188016', 
-                                  '8157432', '3346994', '2255392', '1176647', '2633324']
+            # If we don't have enough item numbers from OCR, let the user know
+            if len(item_numbers) == 0:
+                flash('No item numbers detected from the receipt. Try a clearer image or different lighting.', 'warning')
             
-            # Add the core item numbers if they weren't detected
-            for known_number in known_item_numbers[:3]:  # Add the first three always
-                if known_number not in item_numbers:
-                    item_numbers.append(known_number)
-            
-            # Fill with known numbers if needed to get to 10 items
+            # Limit to 10 item numbers if we have more than that
             required_count = 10
-            while len(item_numbers) < required_count and known_item_numbers:
-                next_number = known_item_numbers.pop(0)
-                if next_number not in item_numbers:
-                    item_numbers.append(next_number)
-            
-            # Limit to 10 item numbers
-            item_numbers = item_numbers[:required_count]
+            if len(item_numbers) > required_count:
+                item_numbers = item_numbers[:required_count]
             
             # Create data for these item numbers
             extracted_data = []
@@ -185,7 +175,7 @@ def upload_file():
             session['extracted_data'] = extracted_data
             session['image_path'] = filepath
             
-            flash('Receipt processed successfully. 10 items extracted.', 'success')
+            flash(f'Receipt processed successfully. {len(extracted_data)} items extracted.', 'success')
             return redirect(url_for('show_results'))
         except Exception as e:
             db.session.rollback()
