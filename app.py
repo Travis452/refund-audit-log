@@ -465,6 +465,91 @@ def create_sample_data():
     flash('Sample data created successfully.', 'success')
     return redirect(url_for('show_results'))
 
+@app.route('/manual-entry', methods=['POST'])
+def manual_entry():
+    """Process manually entered item numbers"""
+    try:
+        logging.info("Manual item entry endpoint called")
+        
+        # Get item numbers from form - one per line
+        item_numbers_text = request.form.get('item_numbers', '')
+        if not item_numbers_text.strip():
+            flash('Please enter at least one item number.', 'warning')
+            return redirect(url_for('index'))
+            
+        # Split by lines and clean up
+        item_numbers = [line.strip() for line in item_numbers_text.split('\n') if line.strip()]
+        logging.info(f"Received {len(item_numbers)} manually entered item numbers")
+        
+        # Basic validation
+        valid_item_numbers = []
+        for number in item_numbers:
+            # Check if it's a valid item number format (6-9 digits)
+            if re.match(r'^\d{6,9}$', number):
+                valid_item_numbers.append(number)
+            else:
+                logging.warning(f"Invalid item number format: {number}")
+        
+        if not valid_item_numbers:
+            flash('No valid item numbers found. Item numbers should be 6-9 digits.', 'warning')
+            return redirect(url_for('index'))
+            
+        logging.info(f"Found {len(valid_item_numbers)} valid item numbers")
+        
+        # Create data entries for these item numbers
+        extracted_data = []
+        from datetime import datetime
+        today = datetime.now().strftime('%m/%d/%y')
+        current_month = datetime.now().strftime('%m')
+        period = f"P{current_month}"
+        
+        # Create an entry for each item number
+        for item_number in valid_item_numbers:
+            item_data = {
+                'item_number': item_number,
+                'price': '0.00',  # Default price, user can edit
+                'period': period,
+                'date': today,
+                'time': datetime.now().strftime('%H:%M:%S'),
+                'description': f"Item {item_number}",
+                'quantity': 1,
+                'exception': ''
+            }
+            extracted_data.append(item_data)
+        
+        # Generate a session ID
+        session_id = str(uuid.uuid4())
+        session['session_id'] = session_id
+        logging.info(f"Generated session ID for manual entry: {session_id}")
+        
+        # Save to database
+        for item in extracted_data:
+            report_item = ReportItem(
+                session_id=session_id,
+                item_number=item.get('item_number', ''),
+                price=item.get('price', ''),
+                period=item.get('period', 'P00'),
+                exception=item.get('exception', ''),
+                quantity=item.get('quantity', 1),
+                additional_info=item.get('additional_info', ''),
+                original_description=item.get('description', ''),
+                original_date=item.get('date', ''),
+                original_time=item.get('time', '')
+            )
+            db.session.add(report_item)
+        db.session.commit()
+        
+        # Store in session for results page
+        session['extracted_data'] = extracted_data
+        
+        flash(f'Successfully processed {len(extracted_data)} item numbers.', 'success')
+        return redirect(url_for('show_results'))
+    except Exception as e:
+        db.session.rollback()
+        logging.error(f"Error processing manual item numbers: {str(e)}")
+        flash(f'Error processing item numbers: {str(e)}', 'danger')
+        return redirect(url_for('index'))
+
 @app.route('/results')
 def show_results():
     extracted_data = session.get('extracted_data', [])
@@ -472,7 +557,11 @@ def show_results():
         flash('No data has been extracted yet.', 'warning')
         return redirect(url_for('index'))
     
-    return render_template('results.html', data=extracted_data)
+    # Pass current datetime for template to use
+    from datetime import datetime
+    now = datetime.now()
+    
+    return render_template('results.html', data=extracted_data, now=now)
 
 @app.route('/update-data', methods=['POST'])
 def update_data():

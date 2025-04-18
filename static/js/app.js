@@ -1,8 +1,75 @@
 document.addEventListener('DOMContentLoaded', function() {
-    // Handle adding a new row
-    const addRowBtn = document.getElementById('add-row-btn');
-    if (addRowBtn) {
-        addRowBtn.addEventListener('click', function() {
+    // Add multiple items at once from the text area
+    const addItemsBtn = document.getElementById('add-items-btn');
+    if (addItemsBtn) {
+        addItemsBtn.addEventListener('click', function() {
+            const textarea = document.getElementById('additional-item-numbers');
+            const itemNumbers = textarea.value.trim().split('\n').filter(line => line.trim() !== '');
+            
+            if (itemNumbers.length === 0) {
+                showAlert('warning', 'Please enter at least one item number.');
+                return;
+            }
+            
+            // Remove empty state row if it exists
+            const emptyStateRow = document.getElementById('empty-state-row');
+            if (emptyStateRow) {
+                emptyStateRow.remove();
+            }
+            
+            // Add each item number as a new row
+            const tbody = document.querySelector('#extracted-data-table tbody');
+            const template = document.getElementById('row-template');
+            
+            itemNumbers.forEach(itemNumber => {
+                const trimmedNumber = itemNumber.trim();
+                if (trimmedNumber === '') return;
+                
+                // Basic validation
+                if (!/^\d{6,9}$/.test(trimmedNumber)) {
+                    showAlert('warning', `Invalid item number format: ${trimmedNumber}. Item numbers should be 6-9 digits.`);
+                    return;
+                }
+                
+                const newRow = document.importNode(template.content, true);
+                
+                // Set a unique row ID
+                const rowId = Date.now() + Math.floor(Math.random() * 1000);
+                newRow.querySelector('tr').dataset.rowId = rowId;
+                
+                // Set the item number
+                newRow.querySelector('.item-number').value = trimmedNumber;
+                
+                // Add delete handler to the new row
+                const deleteBtn = newRow.querySelector('.delete-row-btn');
+                deleteBtn.addEventListener('click', function() {
+                    const row = this.closest('tr');
+                    row.remove();
+                });
+                
+                tbody.appendChild(newRow);
+            });
+            
+            // Clear the textarea
+            textarea.value = '';
+            
+            // Update the item count
+            updateItemCount();
+            
+            showAlert('success', `Added ${itemNumbers.length} item(s) to the table.`);
+        });
+    }
+    
+    // Add a single empty row
+    const addSingleRowBtn = document.getElementById('add-single-row-btn');
+    if (addSingleRowBtn) {
+        addSingleRowBtn.addEventListener('click', function() {
+            // Remove empty state row if it exists
+            const emptyStateRow = document.getElementById('empty-state-row');
+            if (emptyStateRow) {
+                emptyStateRow.remove();
+            }
+            
             const tbody = document.querySelector('#extracted-data-table tbody');
             const template = document.getElementById('row-template');
             const newRow = document.importNode(template.content, true);
@@ -16,9 +83,11 @@ document.addEventListener('DOMContentLoaded', function() {
             deleteBtn.addEventListener('click', function() {
                 const row = this.closest('tr');
                 row.remove();
+                updateItemCount();
             });
             
             tbody.appendChild(newRow);
+            updateItemCount();
         });
     }
     
@@ -221,4 +290,18 @@ document.addEventListener('DOMContentLoaded', function() {
             loadingModal.hide();
         }
     }
+    
+    // Update the item count in the header
+    function updateItemCount() {
+        const rows = document.querySelectorAll('#extracted-data-table tbody tr');
+        // Don't count the empty state row
+        const actualRows = Array.from(rows).filter(row => row.id !== 'empty-state-row');
+        const countElement = document.querySelector('.card-header .h5');
+        if (countElement) {
+            countElement.textContent = `Extracted Items (${actualRows.length})`;
+        }
+    }
+    
+    // Initialize item count
+    updateItemCount();
 });

@@ -74,70 +74,96 @@
                 </div>
                 
                 <!-- Main Content -->
-                <div class="card shadow-sm mb-4">
-                    <div class="card-header bg-dark-subtle">
-                        <div class="d-flex justify-content-between align-items-center">
-                            <h3 class="h5 mb-0">Extracted Items ({{ data|length }})</h3>
-                            <div>
-                                <button id="add-row-btn" class="btn btn-sm btn-outline-secondary me-2">
-                                    <i class="fas fa-plus me-1"></i>Add Row
-                                </button>
-                                <button id="save-changes-btn" class="btn btn-sm btn-outline-primary">
-                                    <i class="fas fa-save me-1"></i>Save Changes
-                                </button>
+                <div class="row mb-4">
+                    <div class="col-md-4">
+                        <!-- Bulk Item Entry Panel -->
+                        <div class="card shadow-sm h-100">
+                            <div class="card-header bg-dark-subtle">
+                                <h3 class="h5 mb-0"><i class="fas fa-list-ol me-2"></i>Add Item Numbers</h3>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted">Enter item numbers from your receipt, one per line:</p>
+                                <form id="additional-items-form">
+                                    <div class="mb-3">
+                                        <textarea class="form-control" id="additional-item-numbers" rows="10" placeholder="Enter item numbers, one per line.&#10;Example:&#10;12345678&#10;98765432"></textarea>
+                                    </div>
+                                    <button type="button" id="add-items-btn" class="btn btn-primary w-100">
+                                        <i class="fas fa-plus-circle me-2"></i>Add These Items
+                                    </button>
+                                </form>
+                                <hr>
+                                <div class="d-grid">
+                                    <button id="add-single-row-btn" class="btn btn-outline-secondary">
+                                        <i class="fas fa-plus me-1"></i>Add Empty Row
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
-                    <div class="card-body p-0">
-                        <div class="table-responsive">
-                            <table class="table table-hover mb-0" id="extracted-data-table">
-                                <thead class="table-dark">
-                                    <tr>
-                                        <th>Item #</th>
-                                        <th>Exceptions</th>
-                                        <th>Qty</th>
-                                        <th>Total Sell</th>
-                                        <th>Period</th>
-                                        <th>Additional Info</th>
-                                        <th class="text-center">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% if data %}
-                                        {% for item in data %}
-                                            <tr data-row-id="{{ loop.index }}">
-                                                <td><input type="text" class="form-control form-control-sm item-number" value="{{ item.item_number }}"></td>
-                                                <td><input type="text" class="form-control form-control-sm exception" value=""></td>
-                                                <td><input type="number" class="form-control form-control-sm quantity" value="1" min="1"></td>
-                                                <td><input type="text" class="form-control form-control-sm price" value="{{ item.price }}"></td>
-                                                <td>
-                                                    <select class="form-select form-select-sm period">
-                                                        {% for m in range(1, 13) %}
-                                                            <option value="P{{ '%02d' % m }}" {% if item.date and item.date.startswith(m|string ~ '/') %}selected{% endif %}>P{{ '%02d' % m }}</option>
-                                                        {% endfor %}
-                                                    </select>
-                                                </td>
-                                                <td><input type="text" class="form-control form-control-sm additional-info" value="{{ item.time|default('', true) }}"></td>
-                                                <td class="text-center">
-                                                    <button class="btn btn-sm btn-danger delete-row-btn">
-                                                        <i class="fas fa-trash"></i>
-                                                    </button>
-                                                </td>
+                    
+                    <div class="col-md-8">
+                        <!-- Data Table -->
+                        <div class="card shadow-sm h-100">
+                            <div class="card-header bg-dark-subtle">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <h3 class="h5 mb-0">Extracted Items ({{ data|length }})</h3>
+                                    <div>
+                                        <button id="save-changes-btn" class="btn btn-outline-primary">
+                                            <i class="fas fa-save me-1"></i>Save Changes
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="card-body p-0">
+                                <div class="table-responsive">
+                                    <table class="table table-hover mb-0" id="extracted-data-table">
+                                        <thead class="table-dark">
+                                            <tr>
+                                                <th>Item #</th>
+                                                <th>Exceptions</th>
+                                                <th>Qty</th>
+                                                <th>Total Sell</th>
+                                                <th>Period</th>
+                                                <th class="text-center">Actions</th>
                                             </tr>
-                                        {% endfor %}
-                                    {% else %}
-                                        <tr>
-                                            <td colspan="6" class="text-center py-5">
-                                                <div class="empty-state">
-                                                    <i class="fas fa-search fa-3x mb-3 text-muted"></i>
-                                                    <h4>No Data Found</h4>
-                                                    <p class="text-muted">No items could be extracted from the image</p>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    {% endif %}
-                                </tbody>
-                            </table>
+                                        </thead>
+                                        <tbody>
+                                            {% if data %}
+                                                {% for item in data %}
+                                                    <tr data-row-id="{{ loop.index }}">
+                                                        <td><input type="text" class="form-control form-control-sm item-number" value="{{ item.item_number }}"></td>
+                                                        <td><input type="text" class="form-control form-control-sm exception" value="{{ item.exception|default('', true) }}"></td>
+                                                        <td><input type="number" class="form-control form-control-sm quantity" value="{{ item.quantity|default(1, true) }}" min="1"></td>
+                                                        <td><input type="text" class="form-control form-control-sm price" value="{{ item.price }}"></td>
+                                                        <td>
+                                                            <select class="form-select form-select-sm period">
+                                                                {% for m in range(1, 13) %}
+                                                                    <option value="P{{ '%02d' % m }}" {% if item.period == 'P' ~ '%02d' % m or (item.date and item.date.startswith(m|string ~ '/')) %}selected{% endif %}>P{{ '%02d' % m }}</option>
+                                                                {% endfor %}
+                                                            </select>
+                                                        </td>
+                                                        <td class="text-center">
+                                                            <button class="btn btn-sm btn-danger delete-row-btn">
+                                                                <i class="fas fa-trash"></i>
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                {% endfor %}
+                                            {% else %}
+                                                <tr id="empty-state-row">
+                                                    <td colspan="6" class="text-center py-5">
+                                                        <div class="empty-state">
+                                                            <i class="fas fa-search fa-3x mb-3 text-muted"></i>
+                                                            <h4>No Items Found</h4>
+                                                            <p class="text-muted">Add item numbers using the form on the left</p>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            {% endif %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -176,15 +202,18 @@
             <td><input type="text" class="form-control form-control-sm item-number" value=""></td>
             <td><input type="text" class="form-control form-control-sm exception" value=""></td>
             <td><input type="number" class="form-control form-control-sm quantity" value="1" min="1"></td>
-            <td><input type="text" class="form-control form-control-sm price" value=""></td>
+            <td><input type="text" class="form-control form-control-sm price" value="0.00"></td>
             <td>
                 <select class="form-select form-select-sm period">
                     {% for m in range(1, 13) %}
-                        <option value="P{{ '%02d' % m }}">P{{ '%02d' % m }}</option>
+                        {% if m == now.month %}
+                            <option value="P{{ '%02d' % m }}" selected>P{{ '%02d' % m }}</option>
+                        {% else %}
+                            <option value="P{{ '%02d' % m }}">P{{ '%02d' % m }}</option>
+                        {% endif %}
                     {% endfor %}
                 </select>
             </td>
-            <td><input type="text" class="form-control form-control-sm additional-info" value=""></td>
             <td class="text-center">
                 <button class="btn btn-sm btn-danger delete-row-btn">
                     <i class="fas fa-trash"></i>

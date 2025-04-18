@@ -79,10 +79,24 @@
                                     <button id="submit-upload" class="btn btn-primary btn-lg w-100">
                                         <i class="fas fa-upload me-2"></i>Process Image
                                     </button>
-                                    <div class="text-center mt-2">
-                                        <a href="{{ url_for('create_sample_data') }}" class="btn btn-link">
-                                            <i class="fas fa-vial me-1"></i>Create Sample Data for Testing
-                                        </a>
+                                </div>
+                                
+                                <!-- Manual Item Number Entry -->
+                                <div class="card mt-4">
+                                    <div class="card-header bg-dark-subtle">
+                                        <h5 class="mb-0"><i class="fas fa-keyboard me-2"></i>Manual Item Entry</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <p class="text-muted">If OCR can't read your item numbers correctly, you can manually enter them here:</p>
+                                        <form action="{{ url_for('manual_entry') }}" method="post" id="manual-entry-form">
+                                            <div class="mb-3">
+                                                <label for="manual-item-numbers" class="form-label">Item Numbers</label>
+                                                <textarea class="form-control" id="manual-item-numbers" name="item_numbers" rows="5" placeholder="Enter item numbers, one per line. For example:&#10;12345678&#10;98765432&#10;55667788"></textarea>
+                                            </div>
+                                            <button type="submit" class="btn btn-success w-100">
+                                                <i class="fas fa-check-circle me-2"></i>Use These Item Numbers
+                                            </button>
+                                        </form>
                                     </div>
                                 </div>
                             </div>
