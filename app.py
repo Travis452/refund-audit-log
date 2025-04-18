@@ -73,22 +73,56 @@ def upload_file():
             import re  # Make sure re is imported
             logging.warning("Looking directly for item numbers in the OCR text")
             
-            # Extract all 6-8 digit numbers from the OCR text as potential item numbers
-            item_pattern = r'\b\d{6,8}\b'
-            matches = re.findall(item_pattern, extracted_text)
+            # Extract 6-8 digit numbers with improved accuracy
+            # Look for 7-digit and 8-digit numbers first (most likely to be item numbers)
+            primary_pattern = r'\b\d{7,8}\b'
+            primary_matches = re.findall(primary_pattern, extracted_text)
+            logging.info(f"Found {len(primary_matches)} 7-8 digit numbers")
             
-            # Filter out likely non-item numbers
+            # Also look for 6-digit numbers as a fallback
+            secondary_pattern = r'\b\d{6}\b'
+            secondary_matches = re.findall(secondary_pattern, extracted_text)
+            logging.info(f"Found {len(secondary_matches)} 6-digit numbers")
+            
+            # Combine all matches, with 7-8 digit numbers first
+            matches = primary_matches + secondary_matches
+            
+            # Advanced filtering to remove false positives
             filtered_matches = []
             for match in matches:
                 # Skip if it looks like a date (e.g., 20220405)
                 if re.match(r'\d{4}(0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01])', match):
+                    logging.debug(f"Skipping date-like number: {match}")
                     continue
-                # Skip if it starts with 0 (unlikely to be an item number)
+                    
+                # Skip numbers that start with 0
                 if match.startswith('0'):
+                    logging.debug(f"Skipping 0-prefixed number: {match}")
                     continue
-                # Skip if it looks like a phone number extension
-                if len(match) == 6 and match.startswith('1'):
+                    
+                # Avoid numbers that are part of larger sequences 
+                # (like phone numbers with area codes)
+                larger_number_pattern = fr'\d{{3,5}}{match}'
+                if re.search(larger_number_pattern, extracted_text):
+                    logging.debug(f"Skipping number that appears to be part of a larger sequence: {match}")
                     continue
+                    
+                # Additional check for common receipt numbers that aren't item numbers
+                # Example: register#, transaction#, etc.
+                skip_prefixes = ['register', 'transaction', 'receipt', 'order']
+                should_skip = False
+                
+                for prefix in skip_prefixes:
+                    # Check if this number appears after a prefix like "register#: "
+                    if match in extracted_text and prefix in extracted_text[:extracted_text.find(match)].lower():
+                        logging.debug(f"Skipping number that appears to be a {prefix}#: {match}")
+                        should_skip = True
+                        break
+                        
+                if should_skip:
+                    continue
+                
+                # If it passes all filters, keep it
                 filtered_matches.append(match)
             
             # Remove duplicates

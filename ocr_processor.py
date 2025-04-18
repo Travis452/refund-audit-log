@@ -71,21 +71,34 @@ def process_image(image_path):
             # Convert to grayscale
             gray = cv2.cvtColor(original_img, cv2.COLOR_BGR2GRAY)
             
-            # Try multiple preprocessing techniques specifically for number recognition
+            # Enhanced preprocessing techniques specifically for number recognition on receipts
+            
+            # Apply noise reduction 
+            denoised = cv2.fastNlMeansDenoising(gray, None, 10, 7, 21)
+            
+            # Sharpening to enhance digit edges
+            kernel = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
+            sharpened = cv2.filter2D(gray, -1, kernel)
             
             # Technique 1: Basic thresholding for clear text
             _, binary = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
             
             # Technique 2: Adaptive thresholding for receipt-like documents
             adaptive = cv2.adaptiveThreshold(
-                gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+                denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
             )
             
             # Technique 3: Otsu's thresholding for better separation
-            _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            _, otsu = cv2.threshold(sharpened, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            
+            # Technique 4: Contrast enhancement specifically for receipts
+            # Create a CLAHE object (Contrast Limited Adaptive Histogram Equalization)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+            enhanced = clahe.apply(gray)
+            _, enhanced_binary = cv2.threshold(enhanced, 150, 255, cv2.THRESH_BINARY)
             
             # Store the preprocessed images
-            preprocessed_imgs = [binary, adaptive, otsu]
+            preprocessed_imgs = [binary, adaptive, otsu, enhanced_binary]
             
             # Save for debugging
             temp_dir = '/tmp/preprocessed'
@@ -95,33 +108,83 @@ def process_image(image_path):
                 cv2.imwrite(f"{temp_dir}/processed_{i}.png", p_img)
                 logging.info(f"Saved processed image {i} for debugging")
             
-            # OCR optimized for digit recognition
-            # Configure Tesseract with different options for digit recognition
-            digit_config = '--psm 11 --oem 3 -c tessedit_char_whitelist=0123456789'
+            # OCR configurations optimized for digit recognition on receipts
+            # PSM modes:
+            # 3 = Fully automatic page segmentation, but no OSD (default)
+            # 4 = Assume a single column of text of variable sizes
+            # 6 = Assume a single uniform block of text
+            # 7 = Treat the image as a single text line
+            # 8 = Treat the image as a single word
+            # 10 = Treat the image as a single character
+            # 11 = Sparse text. Find as much text as possible in no particular order
             
-            # For each preprocessed image, run OCR
+            # Configuration for digit extraction from receipts
+            digit_configs = [
+                '--psm 11 --oem 3 -c tessedit_char_whitelist=0123456789',  # Sparse text mode
+                '--psm 6 --oem 3 -c tessedit_char_whitelist=0123456789',   # Single block mode
+                '--psm 4 --oem 3 -c tessedit_char_whitelist=0123456789',   # Single column mode
+                '--psm 3 --oem 3 -c tessedit_char_whitelist=0123456789'    # Full page mode
+            ]
+            
+            # Standard OCR configurations for general text
+            standard_configs = [
+                '--psm 3 --oem 3',  # Default for general OCR
+                '--psm 4 --oem 3',  # Single column mode
+            ]
+            
+            # For each preprocessed image, run OCR with multiple configurations
             for i, p_img in enumerate(preprocessed_imgs):
-                try:
-                    logging.info(f"Running OCR on preprocessed image {i}")
-                    # Get text from the image - standard OCR
-                    ocr_text = pytesseract.image_to_string(p_img)
-                    ocr_results.append(ocr_text)
-                    logging.info(f"OCR technique {i+1} (standard) extracted {len(ocr_text)} characters")
-                    
-                    # Also try digit-specific OCR to capture item numbers
-                    # This focuses just on finding sequences of digits
-                    digit_text = pytesseract.image_to_string(p_img, config=digit_config)
-                    ocr_results.append(digit_text)
-                    logging.info(f"OCR technique {i+1} (digit-specific) extracted {len(digit_text)} characters")
-                except Exception as ocr_error:
-                    logging.error(f"OCR technique {i+1} failed: {str(ocr_error)}")
+                logging.info(f"Running OCR on preprocessed image {i}")
+                
+                # Try all standard OCR configs for general text extraction
+                for config_idx, config in enumerate(standard_configs):
+                    try:
+                        ocr_text = pytesseract.image_to_string(p_img, config=config)
+                        ocr_results.append(ocr_text)
+                        logging.info(f"Image {i+1}, standard config {config_idx+1} extracted {len(ocr_text)} characters")
+                    except Exception as ocr_error:
+                        logging.error(f"Standard OCR failed on image {i+1}, config {config_idx+1}: {str(ocr_error)}")
+                
+                # Try all digit-specific OCR configs for number detection
+                for config_idx, config in enumerate(digit_configs):
+                    try:
+                        digit_text = pytesseract.image_to_string(p_img, config=config)
+                        ocr_results.append(digit_text)
+                        logging.info(f"Image {i+1}, digit config {config_idx+1} extracted {len(digit_text)} characters")
+                    except Exception as ocr_error:
+                        logging.error(f"Digit OCR failed on image {i+1}, config {config_idx+1}: {str(ocr_error)}")
             
-            # Also try directly on grayscale to catch anything we missed
+            # Also try segmenting the image into regions and processing each separately
+            # This can help with busy receipts by focusing on smaller areas
             try:
-                logging.info("Running OCR on grayscale image")
-                ocr_results.append(pytesseract.image_to_string(gray))
+                img_height, img_width = gray.shape[:2]
+                segment_height = img_height // 3
+                
+                # Process in three overlapping horizontal strips
+                for y in range(0, img_height - segment_height//2, segment_height//2):
+                    segment = gray[y:min(y+segment_height, img_height), :]
+                    
+                    # Skip empty segments
+                    if segment.size == 0 or np.mean(segment) > 240:  # Very bright/white segment
+                        continue
+                        
+                    logging.info(f"Processing image segment at y={y}")
+                    
+                    # Try the most effective digit config on this segment
+                    segment_text = pytesseract.image_to_string(segment, config=digit_configs[0])
+                    ocr_results.append(segment_text)
+                    logging.info(f"Segment at y={y} extracted {len(segment_text)} characters")
+            except Exception as segment_error:
+                logging.error(f"Segment processing failed: {str(segment_error)}")
+                
+            # Try one more pass on the denoised grayscale image
+            try:
+                logging.info("Running OCR on denoised grayscale image")
+                denoised_text = pytesseract.image_to_string(denoised, config=standard_configs[0])
+                ocr_results.append(denoised_text)
+                logging.info(f"Denoised grayscale OCR extracted {len(denoised_text)} characters")
             except Exception as e:
-                logging.error(f"Grayscale OCR failed: {str(e)}")
+                logging.error(f"Denoised grayscale OCR failed: {str(e)}")
                 
             # Combine all OCR results
             combined_text = "\n".join(ocr_results)
@@ -157,7 +220,9 @@ def process_image(image_path):
                     h, w = img.shape[:2]
                     # Extract the center region (1/3 of the image)
                     center_img = img[h//3:2*h//3, w//3:2*w//3]
-                    extracted_text = pytesseract.image_to_string(center_img)
+                    # Try with the best digit recognition config
+                    best_digit_config = '--psm 6 --oem 3 -c tessedit_char_whitelist=0123456789'
+                    extracted_text = pytesseract.image_to_string(center_img, config=best_digit_config)
                     # Cancel timeout
                     signal.alarm(0)
                     return extracted_text
