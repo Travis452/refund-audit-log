@@ -81,22 +81,20 @@
                                     </button>
                                 </div>
                                 
-                                <!-- Manual Item Number Entry -->
+                                <!-- Advanced OCR Tips -->
                                 <div class="card mt-4">
                                     <div class="card-header bg-dark-subtle">
-                                        <h5 class="mb-0"><i class="fas fa-keyboard me-2"></i>Manual Item Entry</h5>
+                                        <h5 class="mb-0"><i class="fas fa-lightbulb me-2"></i>Advanced OCR Tips</h5>
                                     </div>
                                     <div class="card-body">
-                                        <p class="text-muted">If OCR can't read your item numbers correctly, you can manually enter them here:</p>
-                                        <form action="{{ url_for('manual_entry') }}" method="post" id="manual-entry-form">
-                                            <div class="mb-3">
-                                                <label for="manual-item-numbers" class="form-label">Item Numbers</label>
-                                                <textarea class="form-control" id="manual-item-numbers" name="item_numbers" rows="5" placeholder="Enter item numbers, one per line. For example:&#10;12345678&#10;98765432&#10;55667788"></textarea>
-                                            </div>
-                                            <button type="submit" class="btn btn-success w-100">
-                                                <i class="fas fa-check-circle me-2"></i>Use These Item Numbers
-                                            </button>
-                                        </form>
+                                        <p class="text-muted">For best OCR results with receipt images:</p>
+                                        <ul class="mb-0">
+                                            <li>Ensure good lighting when taking photos</li>
+                                            <li>Hold the camera directly above the receipt</li>
+                                            <li>Make sure item numbers are clearly visible</li>
+                                            <li>Avoid shadows and glare on the receipt</li>
+                                            <li>Crop images to focus on the item details</li>
+                                        </ul>
                                     </div>
                                 </div>
                             </div>
