@@ -53,15 +53,15 @@ def upload_file():
     
     if file and allowed_file(file.filename):
         try:
-            # Import our new comprehensive image processor
-            from new_uploader import process_receipt_image
+            # Import our SAFE image processor that doesn't use pytesseract
+            from safe_uploader import process_receipt_image_safe
             
             # Generate a session ID for this batch of data
             session_id = str(uuid.uuid4())
             session['session_id'] = session_id
             
-            # Process the image using our comprehensive processor
-            success, result = process_receipt_image(
+            # Process the image using our safe processor
+            success, result = process_receipt_image_safe(
                 file, 
                 app, 
                 temp_dir=app.config['UPLOAD_FOLDER']
