@@ -63,7 +63,7 @@ def process_quick(image_path):
         return f"Error: Quick processing failed: {str(e)}"
 
 def extract_item_numbers_direct(image_path):
-    """Directly extract item numbers from receipt using specialized approach"""
+    """Directly extract member numbers from receipt using specialized approach"""
     try:
         # Read image with OpenCV (needed for some preprocessing)
         img = cv2.imread(image_path, 0)  # Grayscale
@@ -84,32 +84,32 @@ def extract_item_numbers_direct(image_path):
         # Use both images for better results
         item_numbers = []
         
-        # Config specifically for receipt item numbers
+        # Config specifically for receipt numbers
         # Treat the image as having multiple lines of isolated numbers
         item_number_config = '--psm 11 --oem 3 -c tessedit_char_whitelist=0123456789'
         
-        # Process different regions of the image to increase chances of finding item numbers
-        # Process the entire image at low resolution
+        # Process different regions of the image to increase chances of finding member numbers
+        # Process TOP THIRD of image where member numbers usually appear
+        top_section = img[0:h//3, :]
+        top_text = pytesseract.image_to_string(top_section, config=item_number_config)
+        
+        # Process full image
         full_text = pytesseract.image_to_string(binary1, config=item_number_config)
         
-        # Process middle section where item details usually appear
+        # Process middle section as fallback
         middle_section = img[h//4:3*h//4, w//5:4*w//5]
         middle_text = pytesseract.image_to_string(middle_section, config=item_number_config)
         
-        # Also try with adaptive threshold on middle
-        middle_adaptive = adaptive[h//4:3*h//4, w//5:4*w//5]
-        adaptive_text = pytesseract.image_to_string(middle_adaptive, config=item_number_config)
+        # Combine all text, prioritizing top section where member numbers typically appear
+        all_text = top_text + "\n" + full_text + "\n" + middle_text
         
-        # Combine all text
-        all_text = full_text + "\n" + middle_text + "\n" + adaptive_text
-        
-        # Extract potential item numbers with regex
-        # Look for 6-9 digit numbers which are typical item/SKU numbers
+        # Extract potential member numbers with regex
+        # Look for 6-12 digit numbers which are typical member/customer IDs
         import re
-        pattern = r'\b\d{6,9}\b'
+        pattern = r'\b\d{6,12}\b'
         candidates = re.findall(pattern, all_text)
         
-        # Filter out likely non-item numbers
+        # Filter out likely non-member numbers
         for num in candidates:
             # Skip pure repeated digits (likely noise or separators)
             if len(set(num)) <= 2:  # Only 1 or 2 unique digits
@@ -272,9 +272,9 @@ def extract_data_from_text(text):
     
     logging.info("Looking for item data in text")
     
-    # Patterns specifically designed for your receipt format - updated based on image.jpg
-    member_line_pattern = r'Member#:\s*(\d+).*?(\d+\.\d{2})'
-    operator_line_pattern = r'Operator ID:\s*(\d+).*?(\d+\.\d{2})'
+    # Patterns specifically designed to find member numbers on receipts
+    member_line_pattern = r'(?:Member|Member#|Member\s*No[.:]*|Member\s*Number|Customer|ID|Account)[#:\s]*(\d+)'
+    operator_line_pattern = r'(?:Operator|Cashier|Employee|Associate)[#:\s]*(\d+)'
     
     # Track which item numbers we've already processed to avoid duplicates
     processed_items = set()
@@ -285,13 +285,15 @@ def extract_data_from_text(text):
         member_match = re.search(member_line_pattern, line)
         if member_match:
             item_number = member_match.group(1)
-            price = member_match.group(2)
+            price = "0.00"  # Default price for member number
             
-            # Extract description - it's usually between the item number and price
-            description = ""
-            desc_match = re.search(r'Member#:\s*\d+\s*(.*?)\s*\d+\.\d{2}', line)
-            if desc_match:
-                description = desc_match.group(1).strip()
+            # Try to find price in the same line
+            price_match = re.search(r'(\d+\.\d{2})', line)
+            if price_match:
+                price = price_match.group(1)
+            
+            # Extract description (simply use "Member" as description)
+            description = "Member"
             
             # Try to find the date for this item
             item_date = report_date
@@ -321,13 +323,15 @@ def extract_data_from_text(text):
         operator_match = re.search(operator_line_pattern, line)
         if operator_match:
             item_number = operator_match.group(1)
-            price = operator_match.group(2)
+            price = "0.00"  # Default price for operator
+            
+            # Try to find price in the same line
+            price_match = re.search(r'(\d+\.\d{2})', line)
+            if price_match:
+                price = price_match.group(1)
             
             # Extract description
-            description = ""
-            desc_match = re.search(r'Operator ID:\s*\d+\s*(.*?)\s*\d+\.\d{2}', line)
-            if desc_match:
-                description = desc_match.group(1).strip()
+            description = "Operator/Employee"
             
             # Try to find the date for this item
             item_date = report_date
@@ -372,11 +376,11 @@ def extract_data_from_text(text):
     # Process directly extracted item numbers in the text first
     # These are most likely to be actual item numbers rather than noise
     
-    # Look at the first 10 lines which is where the direct item numbers are placed
+    # Look at the first 10 lines which is where the direct member numbers are placed
     for i in range(min(10, len(lines))):
         line = lines[i].strip()
-        # Look for lines that contain only a 6-9 digit number - these are our direct extractions
-        if re.match(r'^\d{6,9}$', line):
+        # Look for lines that contain only a 6-12 digit number - these are our direct extractions of member numbers
+        if re.match(r'^\d{6,12}$', line):
             item_number = line
             if item_number not in processed_items:
                 processed_items.add(item_number)
@@ -395,7 +399,7 @@ def extract_data_from_text(text):
         logging.info("No items found with specific patterns, trying more generic detection")
         
         # Look for lines that contain both a number and a price
-        item_pattern = r'(\d{6,9})'  # Look for 6-9 digit numbers
+        item_pattern = r'(\d{6,12})'  # Look for 6-12 digit numbers (typical for member numbers)
         price_pattern = r'(\d+\.\d{2})'
         time_pattern = r'(\d{2}:\d{2}:\d{2})'
     

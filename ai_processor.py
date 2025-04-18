@@ -36,24 +36,25 @@ def extract_item_numbers_with_ai(image_path):
         # Encode the image
         base64_image = encode_image(image_path)
         
-        # Create prompt for item number extraction
+        # Create prompt for member number extraction
         prompt = """
         Analyze this receipt image and extract the following information:
-        1. All item/product numbers (SKU, UPC, item codes)
-        2. The price for each item (if visible)
+        1. The MEMBER NUMBER or CUSTOMER ID (the most prominent customer identifier)
+        2. The price for any items (if visible)
         3. The date and time of the transaction (if visible)
         
         Format your response as a JSON array with each item having these properties:
         {
-            "item_number": "the extracted item number",
-            "price": "the price of the item (if available)",
+            "item_number": "the extracted member number or customer ID",
+            "price": "the price (if available)",
             "date": "the date of the receipt (if available)",
             "time": "the time on the receipt (if available)"
         }
         
-        Focus specifically on finding product/item numbers which are usually 6-12 digits.
-        Don't include other types of numbers (like phone numbers, store numbers, etc).
-        If you can't find any item numbers, return an empty array.
+        Focus specifically on finding MEMBER NUMBERS which are usually 6-12 digits.
+        Look for labels like "Member:", "Member #:", "Customer ID:", "Account:", etc.
+        The member number is usually at the top of the receipt.
+        If you can't find any member numbers, return an empty array.
         """
         
         try:
