@@ -145,10 +145,9 @@ def upload_file():
                 except Exception as fallback_error:
                     logging.error(f"Emergency fallback also failed: {str(fallback_error)}")
                     
-                    # If all OCR methods fail, provide a useful message and
-                    # immediately redirect to the sample data route
-                    flash("Your receipt image is too complex to process automatically. Redirecting to sample data for your convenience.", "warning")
-                    return redirect(url_for('create_sample_data'))
+                    # If all OCR methods fail, provide a useful error message
+                    flash("Error processing receipt image. Please try a clearer image.", "danger")
+                    return redirect(url_for('index'))
                     
             if isinstance(extracted_text, str) and "Error" in extracted_text:
                 logging.error(f"OCR processing error: {extracted_text}")
@@ -315,9 +314,9 @@ def upload_file():
             
             # Check for known timeout errors, including worker timeout scenario
             if "timeout" in str(e).lower() or "worker" in str(e).lower() or "time" in str(e).lower():
-                logging.error("Detected a potential timeout error, redirecting to sample data")
-                flash("Image processing timed out. Displaying sample data for your convenience.", "warning")
-                return redirect(url_for('create_sample_data'))
+                logging.error("Detected a potential timeout error")
+                flash("Image processing timed out. Please try again with a clearer image or smaller image file.", "warning")
+                return redirect(url_for('index'))
             
             flash(f'Error processing image: {str(e)}', 'danger')
             return redirect(url_for('index'))
