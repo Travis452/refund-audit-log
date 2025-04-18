@@ -14,8 +14,9 @@ class TimeoutError(Exception):
 def timeout_handler(signum, frame):
     raise TimeoutError("OCR processing timed out - image might be too complex")
 
-# Set the default timeout for OCR operations to 30 seconds
-OCR_TIMEOUT_SECONDS = 30
+# Set the default timeout for OCR operations to 10 seconds to avoid Gunicorn worker timeout
+# Gunicorn's default worker timeout is 30 seconds, so we need to finish faster
+OCR_TIMEOUT_SECONDS = 10
 
 # This function is now integrated into process_image
 
@@ -97,16 +98,12 @@ def process_image(image_path):
             enhanced = clahe.apply(gray)
             _, enhanced_binary = cv2.threshold(enhanced, 150, 255, cv2.THRESH_BINARY)
             
-            # Store the preprocessed images
-            preprocessed_imgs = [binary, adaptive, otsu, enhanced_binary]
+            # Use only the most effective preprocessing techniques to save time
+            # Binary and adaptive typically work best for receipts
+            preprocessed_imgs = [binary, adaptive]
             
-            # Save for debugging
-            temp_dir = '/tmp/preprocessed'
-            os.makedirs(temp_dir, exist_ok=True)
-            
-            for i, p_img in enumerate(preprocessed_imgs):
-                cv2.imwrite(f"{temp_dir}/processed_{i}.png", p_img)
-                logging.info(f"Saved processed image {i} for debugging")
+            # Skip saving debug images to improve performance
+            logging.info(f"Using {len(preprocessed_imgs)} preprocessed images for OCR")
             
             # OCR configurations optimized for digit recognition on receipts
             # PSM modes:
@@ -118,18 +115,15 @@ def process_image(image_path):
             # 10 = Treat the image as a single character
             # 11 = Sparse text. Find as much text as possible in no particular order
             
-            # Configuration for digit extraction from receipts
+            # Use only the most effective configurations to save processing time
+            # Just two configurations that work best for receipt digit extraction
             digit_configs = [
-                '--psm 11 --oem 3 -c tessedit_char_whitelist=0123456789',  # Sparse text mode
-                '--psm 6 --oem 3 -c tessedit_char_whitelist=0123456789',   # Single block mode
-                '--psm 4 --oem 3 -c tessedit_char_whitelist=0123456789',   # Single column mode
-                '--psm 3 --oem 3 -c tessedit_char_whitelist=0123456789'    # Full page mode
+                '--psm 6 --oem 3 -c tessedit_char_whitelist=0123456789',   # Single block mode - usually best for receipt item numbers
             ]
             
-            # Standard OCR configurations for general text
+            # Just one standard config for general text
             standard_configs = [
                 '--psm 3 --oem 3',  # Default for general OCR
-                '--psm 4 --oem 3',  # Single column mode
             ]
             
             # For each preprocessed image, run OCR with multiple configurations
@@ -154,56 +148,38 @@ def process_image(image_path):
                     except Exception as ocr_error:
                         logging.error(f"Digit OCR failed on image {i+1}, config {config_idx+1}: {str(ocr_error)}")
             
-            # Also try segmenting the image into regions and processing each separately
-            # This can help with busy receipts by focusing on smaller areas
+            # Only process the middle section which typically contains the important data
+            # This is much faster than processing the entire image in segments
             try:
-                # Create a safer version of segmentation that ensures we're working with proper images
+                # Create a single segment from the middle third of the image - often where item numbers are located
                 img_height, img_width = gray.shape[:2]
-                segment_height = img_height // 3
                 
-                logging.info(f"Attempting to segment image with dimensions {img_width}x{img_height}")
+                # Extract just the middle horizontal section
+                middle_y = img_height // 3
+                segment = gray[middle_y:middle_y*2, :]
                 
-                # Process in three horizontal strips with less overlap to avoid errors
-                for i, y in enumerate([0, img_height//3, 2*img_height//3]):
-                    # Make sure we don't go out of bounds
-                    end_y = min(y + segment_height, img_height)
+                if segment.size > 1000:  # Only process if segment is large enough
+                    logging.info(f"Processing middle segment of image from y={middle_y} to y={middle_y*2}")
                     
-                    # Extract segment and ensure it's a valid image for OCR
-                    if y >= end_y:
-                        logging.warning(f"Skipping segment {i} due to invalid dimensions")
-                        continue
-                        
-                    segment = gray[y:end_y, :]
-                    
-                    # Skip processing if segment is too small
-                    if segment.size < 1000:  # Minimum size check
-                        logging.warning(f"Skipping segment {i} due to small size ({segment.size} pixels)")
-                        continue
-                    
-                    # Skip if segment is mostly white/empty
-                    if np.mean(segment) > 240:
-                        logging.info(f"Skipping segment {i} - appears to be mostly white space")
-                        continue
-                        
-                    logging.info(f"Processing image segment {i} from y={y} to y={end_y}")
-                    
-                    # Use a simpler config for segment processing to avoid errors
-                    segment_config = '--psm 6 --oem 3'
-                    segment_text = pytesseract.image_to_string(segment, config=segment_config)
+                    # Use the digit-specific config since we're primarily looking for item numbers
+                    segment_text = pytesseract.image_to_string(segment, config=digit_configs[0])
                     ocr_results.append(segment_text)
-                    logging.info(f"Segment {i} extracted {len(segment_text)} characters")
+                    logging.info(f"Middle segment extracted {len(segment_text)} characters")
             except Exception as segment_error:
                 logging.error(f"Segment processing failed: {str(segment_error)}")
-                logging.error(f"Segment error details: {type(segment_error).__name__}")
                 
-            # Try one more pass on the denoised grayscale image
+            # Try one more pass on just the center part of denoised grayscale image
             try:
-                logging.info("Running OCR on denoised grayscale image")
-                denoised_text = pytesseract.image_to_string(denoised, config=standard_configs[0])
-                ocr_results.append(denoised_text)
-                logging.info(f"Denoised grayscale OCR extracted {len(denoised_text)} characters")
+                # Focus on the center region where item numbers typically appear
+                h, w = denoised.shape[:2]
+                center_region = denoised[h//3:2*h//3, w//4:3*w//4]
+                
+                logging.info("Running OCR on center region of denoised image")
+                center_text = pytesseract.image_to_string(center_region, config='--psm 6 --oem 3')
+                ocr_results.append(center_text)
+                logging.info(f"Center region OCR extracted {len(center_text)} characters")
             except Exception as e:
-                logging.error(f"Denoised grayscale OCR failed: {str(e)}")
+                logging.error(f"Center region OCR failed: {str(e)}")
                 
             # Combine all OCR results
             combined_text = "\n".join(ocr_results)
