@@ -4,7 +4,18 @@ import re
 import logging
 import os
 import numpy as np
+import signal
 from datetime import datetime
+
+# Set up a timeout handler to prevent OCR from hanging
+class TimeoutError(Exception):
+    pass
+
+def timeout_handler(signum, frame):
+    raise TimeoutError("OCR processing timed out - image might be too complex")
+
+# Set the default timeout for OCR operations to 30 seconds
+OCR_TIMEOUT_SECONDS = 30
 
 # This function is now integrated into process_image
 
@@ -26,6 +37,11 @@ def process_image(image_path):
         # but need to implement a better processing approach specifically for numbers
         ocr_results = []
         
+        # Set up timeout to prevent hanging
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(OCR_TIMEOUT_SECONDS)
+        logging.info(f"Setting OCR timeout to {OCR_TIMEOUT_SECONDS} seconds")
+        
         try:
             # Read the image
             img = cv2.imread(image_path)
@@ -33,6 +49,21 @@ def process_image(image_path):
                 logging.error("Failed to read image - it may be corrupted or in an unsupported format")
                 # Return a fallback message to avoid crashing
                 return "Error: Could not process image. It may be corrupted or in an unsupported format."
+            
+            # First, try a faster approach that optimizes specifically for item numbers
+            # Resize the image to make processing faster
+            image_h, image_w = img.shape[:2]
+            logging.info(f"Original image dimensions: {image_w}x{image_h}")
+            
+            # Only resize if the image is very large
+            max_dim = 1800
+            scale_factor = 1.0
+            if max(image_h, image_w) > max_dim:
+                scale_factor = max_dim / max(image_h, image_w)
+                new_w = int(image_w * scale_factor)
+                new_h = int(image_h * scale_factor)
+                img = cv2.resize(img, (new_w, new_h))
+                logging.info(f"Resized image to {new_w}x{new_h} for faster processing")
             
             # Create a working copy
             original_img = img.copy()
@@ -62,48 +93,81 @@ def process_image(image_path):
             
             for i, p_img in enumerate(preprocessed_imgs):
                 cv2.imwrite(f"{temp_dir}/processed_{i}.png", p_img)
+                logging.info(f"Saved processed image {i} for debugging")
             
             # OCR optimized for digit recognition
-            # We'll use a custom config focused on digits and test it on each preprocessed image
+            # Configure Tesseract with different options for digit recognition
             digit_config = '--psm 11 --oem 3 -c tessedit_char_whitelist=0123456789'
             
             # For each preprocessed image, run OCR
             for i, p_img in enumerate(preprocessed_imgs):
                 try:
-                    # Get text from the image
+                    logging.info(f"Running OCR on preprocessed image {i}")
+                    # Get text from the image - standard OCR
                     ocr_text = pytesseract.image_to_string(p_img)
                     ocr_results.append(ocr_text)
+                    logging.info(f"OCR technique {i+1} (standard) extracted {len(ocr_text)} characters")
                     
                     # Also try digit-specific OCR to capture item numbers
                     # This focuses just on finding sequences of digits
                     digit_text = pytesseract.image_to_string(p_img, config=digit_config)
                     ocr_results.append(digit_text)
-                    
-                    logging.info(f"OCR technique {i+1} extracted {len(ocr_text)} characters")
+                    logging.info(f"OCR technique {i+1} (digit-specific) extracted {len(digit_text)} characters")
                 except Exception as ocr_error:
                     logging.error(f"OCR technique {i+1} failed: {str(ocr_error)}")
             
             # Also try directly on grayscale to catch anything we missed
             try:
+                logging.info("Running OCR on grayscale image")
                 ocr_results.append(pytesseract.image_to_string(gray))
-            except Exception:
-                pass
+            except Exception as e:
+                logging.error(f"Grayscale OCR failed: {str(e)}")
                 
             # Combine all OCR results
             combined_text = "\n".join(ocr_results)
             logging.info(f"Combined OCR text length: {len(combined_text)}")
             
+            # Cancel the alarm since OCR completed
+            signal.alarm(0)
+            
             # Return the combined OCR results for further processing
             return combined_text
             
+        except TimeoutError as timeout_error:
+            # Caught a timeout - cancel the alarm and provide a specific error message
+            signal.alarm(0)
+            logging.error(f"OCR processing timed out after {OCR_TIMEOUT_SECONDS} seconds: {str(timeout_error)}")
+            return f"Error: OCR processing timed out after {OCR_TIMEOUT_SECONDS} seconds. The image may be too complex or large to process."
+            
         except Exception as inner_e:
+            # Cancel the alarm for other exceptions too
+            signal.alarm(0)
             logging.error(f"Error during image processing or OCR: {str(inner_e)}")
+            
             # Fall back to basic OCR if everything else fails
             try:
                 logging.info("Attempting direct OCR without preprocessing as final fallback...")
-                extracted_text = pytesseract.image_to_string(cv2.imread(image_path))
-                return extracted_text
-            except:
+                # Set a new timeout for the fallback attempt
+                signal.alarm(15)  # 15 second timeout for the fallback
+                
+                # Try reading just a portion of the image as one last resort
+                logging.info("Reading just the center portion of the image as last resort")
+                img = cv2.imread(image_path)
+                if img is not None:
+                    h, w = img.shape[:2]
+                    # Extract the center region (1/3 of the image)
+                    center_img = img[h//3:2*h//3, w//3:2*w//3]
+                    extracted_text = pytesseract.image_to_string(center_img)
+                    # Cancel timeout
+                    signal.alarm(0)
+                    return extracted_text
+                else:
+                    signal.alarm(0)
+                    return "Error: Could not read image file as fallback."
+            except Exception as fallback_error:
+                # Cancel timeout
+                signal.alarm(0)
+                logging.error(f"Fallback OCR also failed: {str(fallback_error)}")
                 # If that fails too, return an error message
                 return "Error: Failed to process image after multiple attempts."
             
