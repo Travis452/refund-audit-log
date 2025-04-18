@@ -77,11 +77,11 @@ def upload_file():
             # Create 10 sample items to demonstrate the application's capabilities
             extracted_data = []
             
-            # Common electronic items with realistic prices and EXACT item numbers from the receipt
+            # Electronic items with CORRECT item numbers from the receipt (user-provided)
             sample_items = [
-                {'name': 'MICROSOFT XBOX', 'price': '499.99', 'item_number': '9900060'},
-                {'name': 'HDMI CABLE', 'price': '29.99', 'item_number': '8823713'},
-                {'name': 'CONTROLLER', 'price': '59.98', 'item_number': '1117628'},
+                {'name': 'MICROSOFT XBOX', 'price': '499.99', 'item_number': '9900099'},
+                {'name': 'HDMI CABLE', 'price': '29.99', 'item_number': '1806281'},
+                {'name': 'CONTROLLER', 'price': '59.98', 'item_number': '1839592'},
                 {'name': 'SCREEN PROTECTOR', 'price': '14.99', 'item_number': '7276736'},
                 {'name': 'PHONE CHARGER', 'price': '19.98', 'item_number': '7188016'},
                 {'name': 'HEADPHONES', 'price': '49.97', 'item_number': '8157432'},
@@ -164,11 +164,11 @@ def create_sample_data():
     logging.info("Creating sample data for testing")
     
     # Generate sample data to match the Refund Audit format in IMG_6560.png
-    # but also include the items similar to those in the user's receipt
+    # but also include the items similar to those in the user's receipt with CORRECT item numbers
     sample_data = [
-        # Items from the user's receipt format
+        # Items from the user's receipt format with correct item numbers
         {
-            'item_number': '9900060',
+            'item_number': '9900099',
             'price': '499.99',
             'period': 'P04',
             'quantity': 1,
@@ -178,7 +178,7 @@ def create_sample_data():
             'description': 'MICROSOFT XBOX'
         },
         {
-            'item_number': '8823713',
+            'item_number': '1806281',
             'price': '29.99',
             'period': 'P04',
             'quantity': 1,
@@ -188,7 +188,7 @@ def create_sample_data():
             'description': 'HDMI CABLE'
         },
         {
-            'item_number': '1117628',
+            'item_number': '1839592',
             'price': '59.98',
             'period': 'P04',
             'quantity': 1,
