@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 # Import the various OCR methods
 from ocr_processor import process_image, extract_data_from_text, extract_item_numbers_direct, process_quick
 from trained_ocr_processor import process_with_training
+from simple_processor import process_with_simple_method
 
 # Custom timeout exception
 class TimeoutException(Exception):
@@ -175,7 +176,35 @@ def process_receipt_image(file, app, temp_dir="/tmp"):
                     signal.alarm(0)  # Cancel timeout  
                     return True, quick_data
             
-            # If we got here, no extraction method worked
+            # Last possible fallback - use the simple processor that doesn't rely on pytesseract
+            logger.info("Attempting super simple processor as emergency fallback...")
+            simple_results = process_with_simple_method(filepath)
+            
+            if simple_results and len(simple_results) > 0:
+                logger.info(f"Simple fallback found {len(simple_results)} items")
+                
+                # Format simple results to standard format
+                processed_data = []
+                current_month = int(os.popen('date +%m').read().strip())
+                period = f"P{current_month:02d}"
+                
+                for item in simple_results:
+                    item_data = {
+                        'item_number': item.get('item_number', ''),
+                        'price': item.get('price', '0.00'),
+                        'period': period,
+                        'date': item.get('date', ''),
+                        'time': item.get('time', ''),
+                        'description': item.get('description', ''),
+                        'quantity': 1,
+                        'exception': ''
+                    }
+                    processed_data.append(item_data)
+                
+                signal.alarm(0)  # Cancel timeout
+                return True, processed_data
+            
+            # If we got here, absolutely no extraction method worked
             signal.alarm(0)  # Cancel timeout
             return False, "No item numbers could be extracted from the image"
             
