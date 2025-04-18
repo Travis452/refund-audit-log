@@ -51,274 +51,74 @@ def upload_file():
     logging.info(f"File uploaded: {file.filename}")
     
     if file and allowed_file(file.filename):
-        # Create a unique filename to avoid collisions
         try:
-            # Generate a unique filename with UUID to prevent collisions
-            filename = str(uuid.uuid4()) + secure_filename(file.filename)
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            
-            # Ensure the file object is valid
-            if not file or not hasattr(file, 'save'):
-                raise ValueError("Invalid file object")
-                
-            # Save the file with proper error handling
-            file.save(filepath)
-            
-            # Verify the file was saved correctly
-            if not os.path.exists(filepath):
-                raise FileNotFoundError(f"File did not save properly to {filepath}")
-                
-            file_size = os.path.getsize(filepath)
-            if file_size == 0:
-                raise ValueError("Saved file is empty (0 bytes)")
-                
-            logging.info(f"Saved file to {filepath}, size: {file_size} bytes")
-        except Exception as file_error:
-            logging.error(f"Error saving file: {str(file_error)}")
-            flash(f"Error saving uploaded file: {str(file_error)}", 'danger')
-            return redirect(url_for('index'))
-        
-        try:
-            # Process the image with OCR to extract the receipt data with time limit
-            logging.info("Starting OCR processing...")
-            
-            # Add a timeout at the Flask level to ensure it doesn't hang
-            try:
-                # We'll use the OS alarm signal for a flask-level timeout
-                import signal
-                
-                def timeout_handler(signum, frame):
-                    raise TimeoutError("Flask-level timeout reached")
-                
-                # Set a 20-second timeout for the entire OCR process
-                signal.signal(signal.SIGALRM, timeout_handler)
-                signal.alarm(20)
-                
-                # Start the OCR processing
-                extracted_text = process_image(filepath)
-                
-                # Clear the alarm if we got this far
-                signal.alarm(0)
-                
-            except TimeoutError:
-                logging.error("Flask-level timeout reached, skipping OCR and using direct digit extraction")
-                # If OCR times out, we'll use a very basic approach to extract digit sequences
-                # This is our last-resort fallback
-                try:
-                    # Try using our quick OCR processor which is simpler and faster
-                    from ocr_processor import process_quick
-                    
-                    logging.info("Using process_quick for emergency OCR processing")
-                    quick_result = process_quick(filepath)
-                    
-                    if not quick_result.startswith("Error:"):
-                        # If we got valid text, use it
-                        extracted_text = quick_result
-                        logging.info(f"Quick process extracted {len(extracted_text)} characters")
-                    else:
-                        # If quick process failed, try one more very basic approach
-                        import re
-                        import cv2
-                        
-                        # Read the image as grayscale
-                        img = cv2.imread(filepath, 0)
-                        if img is not None:
-                            # Just do basic binary thresholding - very fast
-                            _, binary = cv2.threshold(img, 150, 255, cv2.THRESH_BINARY)
-                            
-                            # Extract center portion where item numbers often appear
-                            h, w = binary.shape
-                            center = binary[h//3:2*h//3, w//4:3*w//4]
-                            
-                            # Run very simple OCR with digit-only config
-                            import pytesseract
-                            simple_config = '--psm 6 --oem 3 -c tessedit_char_whitelist=0123456789'
-                            simple_text = pytesseract.image_to_string(center, config=simple_config)
-                            
-                            if simple_text and len(simple_text) > 0:
-                                extracted_text = simple_text
-                                logging.info(f"Emergency OCR extracted {len(extracted_text)} characters")
-                            else:
-                                extracted_text = "Receipt processed with limited detail. Please check results."
-                        else:
-                            extracted_text = "Failed to read image file for emergency fallback."
-                except Exception as fallback_error:
-                    logging.error(f"Emergency fallback also failed: {str(fallback_error)}")
-                    
-                    # If all OCR methods fail, provide a useful error message
-                    flash("Error processing receipt image. Please try a clearer image.", "danger")
-                    return redirect(url_for('index'))
-                    
-            if isinstance(extracted_text, str) and "Error" in extracted_text:
-                logging.error(f"OCR processing error: {extracted_text}")
-                flash(f'OCR processing error: {extracted_text}', 'danger')
-                return redirect(url_for('index'))
-            
-            # Extract structured data from the OCR text
-            extracted_data = extract_data_from_text(extracted_text)
-            logging.info(f"OCR processing complete, extracted {len(extracted_data)} items")
-            
-            # Always run our more aggressive item number extraction even if OCR found structured data
-            import re  # Make sure re is imported
-            logging.warning("Looking directly for item numbers in the OCR text")
-            
-            # Extract 6-8 digit numbers with improved accuracy
-            # Look for 7-digit and 8-digit numbers first (most likely to be item numbers)
-            primary_pattern = r'\b\d{7,8}\b'
-            primary_matches = re.findall(primary_pattern, extracted_text)
-            logging.info(f"Found {len(primary_matches)} 7-8 digit numbers")
-            
-            # Also look for 6-digit numbers as a fallback
-            secondary_pattern = r'\b\d{6}\b'
-            secondary_matches = re.findall(secondary_pattern, extracted_text)
-            logging.info(f"Found {len(secondary_matches)} 6-digit numbers")
-            
-            # Combine all matches, with 7-8 digit numbers first
-            matches = primary_matches + secondary_matches
-            
-            # Use a simpler approach to avoid regex issues with large text
-            # We'll just take the first 10 items that match basic criteria
-            filtered_matches = []
-            
-            # Set a limit on the number of items we process to avoid timeout
-            processed_count = 0
-            max_to_process = 50
-            
-            for match in matches:
-                # Safety check to avoid processing too many matches
-                processed_count += 1
-                if processed_count > max_to_process:
-                    logging.warning(f"Reached max processing limit of {max_to_process} matches")
-                    break
-                
-                # Basic validation - skip dates and numbers starting with 0
-                if len(match) == 8 and match.startswith(('19', '20')):  # Likely a date like 20220315
-                    continue
-                    
-                if match.startswith('0'):
-                    continue
-                
-                # Simple check for common prefixes
-                skip_match = False
-                for prefix in ['register', 'transaction', 'receipt', 'order']:
-                    # Don't do complex regex, just check if the prefix appears within reasonable distance
-                    prefix_pos = extracted_text.lower().find(prefix)
-                    match_pos = extracted_text.find(match)
-                    
-                    if prefix_pos >= 0 and match_pos >= 0:
-                        # If prefix appears close before the match, likely not an item number
-                        if 0 < match_pos - prefix_pos < 30:  # Within 30 chars
-                            skip_match = True
-                            break
-                
-                if skip_match:
-                    continue
-                    
-                # If it passes simple checks, keep it
-                filtered_matches.append(match)
-                
-                # Once we have 10 matches, stop processing
-                if len(filtered_matches) >= 10:
-                    logging.info("Found 10 matches, stopping processing")
-                    break
-            
-            # Remove duplicates
-            item_numbers = list(dict.fromkeys(filtered_matches))
-            logging.info(f"Extracted {len(item_numbers)} potential item numbers: {item_numbers}")
-            
-            # If we don't have enough item numbers from OCR, let the user know
-            if len(item_numbers) == 0:
-                flash('No item numbers detected from the receipt. Try a clearer image or different lighting.', 'warning')
-            
-            # Limit to 10 item numbers if we have more than that
-            required_count = 10
-            if len(item_numbers) > required_count:
-                item_numbers = item_numbers[:required_count]
-            
-            # Create data for these item numbers
-            extracted_data = []
-            from datetime import datetime
-            today = datetime.now().strftime('%m/%d/%y')
-            period = "P04"  # April
-            
-            # Product names and prices for detected items
-            products = [
-                {'name': 'MICROSOFT XBOX', 'price': '499.99'},
-                {'name': 'HDMI CABLE', 'price': '29.99'},
-                {'name': 'CONTROLLER', 'price': '59.98'},
-                {'name': 'SCREEN PROTECTOR', 'price': '14.99'},
-                {'name': 'PHONE CHARGER', 'price': '19.98'},
-                {'name': 'HEADPHONES', 'price': '49.97'},
-                {'name': 'SMART WATCH', 'price': '349.99'},
-                {'name': 'SCREEN CLEANER', 'price': '24.99'},
-                {'name': 'POWER BANK', 'price': '24.98'},
-                {'name': 'USB CABLE', 'price': '9.99'}
-            ]
-            
-            # Create data for each detected item number
-            for i, item_number in enumerate(item_numbers):
-                product = products[i % len(products)]
-                
-                # Generate time
-                hour = 9 + (i % 8)  # 9 AM to 5 PM
-                minute = (i * 7) % 60
-                second = (i * 13) % 60
-                time_value = f"{hour:02d}:{minute:02d}:{second:02d}"
-                
-                item_data = {
-                    'item_number': item_number,
-                    'price': product['price'],
-                    'period': period,
-                    'date': today,
-                    'time': time_value,
-                    'description': product['name'],
-                    'quantity': 1,
-                    'exception': ''
-                }
-                extracted_data.append(item_data)
-            
-            logging.info(f"Created data for {len(extracted_data)} extracted item numbers")
+            # Import our new comprehensive image processor
+            from new_uploader import process_receipt_image
             
             # Generate a session ID for this batch of data
             session_id = str(uuid.uuid4())
             session['session_id'] = session_id
-            logging.info(f"Generated session ID: {session_id}")
             
-            # Save to database
+            # Process the image using our comprehensive processor
+            success, result = process_receipt_image(
+                file, 
+                app, 
+                temp_dir=app.config['UPLOAD_FOLDER']
+            )
+            
+            if not success:
+                # If processing failed, show error message
+                logging.error(f"Receipt processing failed: {result}")
+                flash(f"Receipt processing failed: {result}", 'danger')
+                return redirect(url_for('index'))
+            
+            # If we got here, processing succeeded and result contains the extracted data
+            extracted_data = result
+            
+            # Check if we actually got any data
+            if not extracted_data or len(extracted_data) == 0:
+                logging.warning("No items were extracted from the receipt")
+                flash('No item numbers detected from the receipt. Try a clearer image or different lighting.', 'warning')
+                return redirect(url_for('index'))
+            
+            # Save extracted items to database
             for item in extracted_data:
                 report_item = ReportItem(
                     session_id=session_id,
                     item_number=item.get('item_number', ''),
                     price=item.get('price', ''),
-                    period=item.get('period', 'P00'),
+                    period=item.get('period', 'P04'),  # Default to April if not specified
                     exception=item.get('exception', ''),
                     quantity=item.get('quantity', 1),
-                    additional_info=item.get('additional_info', ''),
+                    additional_info=item.get('time', ''),  # Use time as additional info
                     original_description=item.get('description', ''),
                     original_date=item.get('date', ''),
                     original_time=item.get('time', '')
                 )
                 db.session.add(report_item)
+            
+            # Commit to database
             db.session.commit()
-            logging.info(f"Saved {len(extracted_data)} items to database")
+            logging.info(f"Saved {len(extracted_data)} items to database with session ID: {session_id}")
             
             # Store extracted data in session for later use
             session['extracted_data'] = extracted_data
-            session['image_path'] = filepath
             
+            # Success message
             flash(f'Receipt processed successfully. {len(extracted_data)} items extracted.', 'success')
             return redirect(url_for('show_results'))
+            
         except Exception as e:
+            # Handle unexpected errors
             db.session.rollback()
             logging.error(f"Error processing image: {str(e)}")
             
-            # Check for known timeout errors, including worker timeout scenario
-            if "timeout" in str(e).lower() or "worker" in str(e).lower() or "time" in str(e).lower():
-                logging.error("Detected a potential timeout error")
-                flash("Image processing timed out. Please try again with a clearer image or smaller image file.", "warning")
-                return redirect(url_for('index'))
-            
-            flash(f'Error processing image: {str(e)}', 'danger')
+            # Check for known timeout errors
+            if "timeout" in str(e).lower():
+                flash("Image processing timed out. Please try again with a clearer image.", "warning")
+            else:
+                flash(f'Error processing image: {str(e)}', 'danger')
+                
             return redirect(url_for('index'))
     else:
         logging.warning(f"Invalid file type: {file.filename}")
