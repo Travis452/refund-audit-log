@@ -12,7 +12,7 @@ from datetime import datetime
 # Import from main.py where app is created
 from main import app, db
 from models import ReportItem, ExportFile
-from ocr_processor import process_image, extract_data_from_text
+from ocr_processor import process_image, extract_data_from_text, extract_item_numbers_direct
 from data_exporter import export_to_excel, export_to_google_sheets
 
 # Configure upload folder
