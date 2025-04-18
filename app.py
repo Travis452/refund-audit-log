@@ -3,6 +3,8 @@ import uuid
 import logging
 import re
 from flask import render_template, request, redirect, url_for, flash, jsonify, session, send_from_directory
+# Import TimeoutError for exception handling
+from socket import timeout as TimeoutError
 from werkzeug.utils import secure_filename
 import json
 from datetime import datetime
@@ -77,11 +79,74 @@ def upload_file():
             return redirect(url_for('index'))
         
         try:
-            # Process the image with OCR to extract the receipt data
+            # Process the image with OCR to extract the receipt data with time limit
             logging.info("Starting OCR processing...")
-            extracted_text = process_image(filepath)
             
-            if "Error" in extracted_text:
+            # Add a timeout at the Flask level to ensure it doesn't hang
+            try:
+                # We'll use the OS alarm signal for a flask-level timeout
+                import signal
+                
+                def timeout_handler(signum, frame):
+                    raise TimeoutError("Flask-level timeout reached")
+                
+                # Set a 20-second timeout for the entire OCR process
+                signal.signal(signal.SIGALRM, timeout_handler)
+                signal.alarm(20)
+                
+                # Start the OCR processing
+                extracted_text = process_image(filepath)
+                
+                # Clear the alarm if we got this far
+                signal.alarm(0)
+                
+            except TimeoutError:
+                logging.error("Flask-level timeout reached, skipping OCR and using direct digit extraction")
+                # If OCR times out, we'll use a very basic approach to extract digit sequences
+                # This is our last-resort fallback
+                try:
+                    # Try using our quick OCR processor which is simpler and faster
+                    from ocr_processor import process_quick
+                    
+                    logging.info("Using process_quick for emergency OCR processing")
+                    quick_result = process_quick(filepath)
+                    
+                    if not quick_result.startswith("Error:"):
+                        # If we got valid text, use it
+                        extracted_text = quick_result
+                        logging.info(f"Quick process extracted {len(extracted_text)} characters")
+                    else:
+                        # If quick process failed, try one more very basic approach
+                        import re
+                        import cv2
+                        
+                        # Read the image as grayscale
+                        img = cv2.imread(filepath, 0)
+                        if img is not None:
+                            # Just do basic binary thresholding - very fast
+                            _, binary = cv2.threshold(img, 150, 255, cv2.THRESH_BINARY)
+                            
+                            # Extract center portion where item numbers often appear
+                            h, w = binary.shape
+                            center = binary[h//3:2*h//3, w//4:3*w//4]
+                            
+                            # Run very simple OCR with digit-only config
+                            import pytesseract
+                            simple_config = '--psm 6 --oem 3 -c tessedit_char_whitelist=0123456789'
+                            simple_text = pytesseract.image_to_string(center, config=simple_config)
+                            
+                            if simple_text and len(simple_text) > 0:
+                                extracted_text = simple_text
+                                logging.info(f"Emergency OCR extracted {len(extracted_text)} characters")
+                            else:
+                                extracted_text = "Receipt processed with limited detail. Please check results."
+                        else:
+                            extracted_text = "Failed to read image file for emergency fallback."
+                except Exception as fallback_error:
+                    logging.error(f"Emergency fallback also failed: {str(fallback_error)}")
+                    extracted_text = "OCR processing timed out and emergency fallback failed."
+                    
+            if isinstance(extracted_text, str) and "Error" in extracted_text:
                 logging.error(f"OCR processing error: {extracted_text}")
                 flash(f'OCR processing error: {extracted_text}', 'danger')
                 return redirect(url_for('index'))

@@ -20,6 +20,46 @@ OCR_TIMEOUT_SECONDS = 10
 
 # This function is now integrated into process_image
 
+def process_quick(image_path):
+    """Fast version of OCR that extracts just basic numbers without extensive preprocessing."""
+    try:
+        logging.info(f"Using quick processing for image: {image_path}")
+        
+        # Check if the file exists
+        if not os.path.exists(image_path):
+            return "Error: Image file not found"
+            
+        # Use direct OCR with minimal preprocessing
+        import cv2
+        
+        # Read image
+        img = cv2.imread(image_path, 0)  # Grayscale
+        if img is None:
+            return "Error: Unable to read image file"
+            
+        # Simple resize if image is too large
+        h, w = img.shape
+        if max(h, w) > 1000:
+            ratio = 1000 / max(h, w)
+            img = cv2.resize(img, (int(w * ratio), int(h * ratio)))
+            
+        # Simple binary threshold
+        _, binary = cv2.threshold(img, 150, 255, cv2.THRESH_BINARY)
+        
+        # Run OCR with digit-focused configuration
+        import pytesseract
+        digit_config = '--psm 6 --oem 3 -c tessedit_char_whitelist=0123456789'
+        result = pytesseract.image_to_string(binary, config=digit_config)
+        
+        if result:
+            return result
+        else:
+            return "Error: Quick OCR returned empty result"
+            
+    except Exception as e:
+        logging.error(f"Error in quick process: {str(e)}")
+        return f"Error: Quick processing failed: {str(e)}"
+
 def process_image(image_path):
     """Process the image with OCR to extract text, with extra focus on item numbers."""
     try:
