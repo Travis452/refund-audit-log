@@ -237,57 +237,109 @@ def create_sample_data():
     """Create sample data for testing without OCR processing"""
     logging.info("Creating sample data for testing")
     
-    # Generate sample data based on real format from IMG_6560.png
+    # Generate sample data to match the Refund Audit format in IMG_6560.png
+    # but also include the items similar to those in the user's receipt
     sample_data = [
+        # Items from the user's receipt format
         {
-            'item_number': '1835592',
-            'price': '29.97',
-            'period': 'P08',
-            'quantity': 3,
+            'item_number': '9900060',
+            'price': '499.99',
+            'period': 'P04',
+            'quantity': 1,
             'exception': '',
-            'date': '08/17/25',
-            'time': '',
-            'description': 'Refund item 1835592'
+            'date': '04/17/25',
+            'time': '13:49:41',
+            'description': 'MICROSOFT XBOX'
         },
         {
-            'item_number': '1537629',
-            'price': '69.97',
-            'period': 'P08',
-            'quantity': 3,
+            'item_number': '8823713',
+            'price': '29.99',
+            'period': 'P04',
+            'quantity': 1,
             'exception': '',
-            'date': '08/17/25',
-            'time': '',
-            'description': 'Refund item 1537629'
+            'date': '04/17/25',
+            'time': '13:50:22',
+            'description': 'HDMI CABLE'
         },
         {
-            'item_number': '1646572',
-            'price': '25.98',
-            'period': 'P09',
-            'quantity': 2,
+            'item_number': '1117628',
+            'price': '59.98',
+            'period': 'P04',
+            'quantity': 1,
             'exception': '',
-            'date': '09/17/25',
-            'time': '',
-            'description': 'Refund item 1646572'
+            'date': '04/17/25',
+            'time': '13:53:10',
+            'description': 'CONTROLLER'
         },
         {
-            'item_number': '1645730',
-            'price': '99.98',
-            'period': 'P09',
-            'quantity': 2,
+            'item_number': '7276736',
+            'price': '14.99',
+            'period': 'P04',
+            'quantity': 1,
             'exception': '',
-            'date': '09/17/25',
-            'time': '',
-            'description': 'Refund item 1645730'
+            'date': '04/17/25',
+            'time': '13:54:46',
+            'description': 'SCREEN PROTECTOR'
         },
         {
-            'item_number': '1641529',
-            'price': '29.98',
-            'period': 'P09',
-            'quantity': 2,
+            'item_number': '7188016',
+            'price': '19.98',
+            'period': 'P04',
+            'quantity': 1,
             'exception': '',
-            'date': '09/17/25',
-            'time': '',
-            'description': 'Refund item 1641529'
+            'date': '04/17/25',
+            'time': '13:55:53',
+            'description': 'PHONE CHARGER'
+        },
+        {
+            'item_number': '8157432',
+            'price': '49.97',
+            'period': 'P04',
+            'quantity': 1,
+            'exception': '',
+            'date': '04/17/25',
+            'time': '13:56:77',
+            'description': 'HEADPHONES'
+        },
+        {
+            'item_number': '3346994',
+            'price': '349.99',
+            'period': 'P04',
+            'quantity': 1,
+            'exception': '',
+            'date': '04/17/25',
+            'time': '13:57:31',
+            'description': 'SMART WATCH'
+        },
+        {
+            'item_number': '2255392',
+            'price': '24.99',
+            'period': 'P04',
+            'quantity': 1,
+            'exception': '',
+            'date': '04/17/25',
+            'time': '13:57:38',
+            'description': 'SCREEN CLEANER'
+        },
+        {
+            'item_number': '1176647',
+            'price': '24.98',
+            'period': 'P04',
+            'quantity': 1,
+            'exception': '',
+            'date': '04/17/25',
+            'time': '13:57:83',
+            'description': 'POWER BANK'
+        },
+        {
+            'item_number': '2633324',
+            'price': '9.99',
+            'period': 'P04',
+            'quantity': 1,
+            'exception': '',
+            'date': '04/17/25',
+            'time': '13:58:44',
+            'description': 'USB CABLE'
         }
     ]
     
