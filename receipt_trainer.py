@@ -56,7 +56,7 @@ class ReceiptTrainer:
         Add an example of an item number with associated image
         
         Args:
-            item_number: The correct item number to identify
+            item_number: The correct item number to identify (can be comma-separated list)
             image_path: Path to the receipt image containing this number
             description: Optional description of the receipt
         """
@@ -65,17 +65,27 @@ class ReceiptTrainer:
             return False
         
         try:
-            # Store example
-            example = {
-                "item_number": item_number,
-                "image_path": image_path,
-                "description": description or f"Example for {item_number}",
-                "added_at": datetime.now().isoformat()
-            }
-            
-            # Add to training data
-            self.training_data["examples"].append(example)
-            logger.info(f"Added example for item number: {item_number}")
+            # Handle comma-separated list of item numbers
+            if ',' in item_number:
+                item_numbers = [num.strip() for num in item_number.split(',')]
+            else:
+                item_numbers = [item_number.strip()]
+                
+            # Filter out empty strings
+            item_numbers = [num for num in item_numbers if num]
+                
+            # Store a separate example for each item number
+            for single_item_number in item_numbers:
+                example = {
+                    "item_number": single_item_number,
+                    "image_path": image_path,
+                    "description": description or f"Example for {single_item_number}",
+                    "added_at": datetime.now().isoformat()
+                }
+                
+                # Add to training data
+                self.training_data["examples"].append(example)
+                logger.info(f"Added example for individual item number: {single_item_number}")
             
             # Save updated training data
             return self.save_training_data()
@@ -149,7 +159,7 @@ class ReceiptTrainer:
         
         Args:
             image_path: Path to the receipt image
-            item_number: The known item number to locate
+            item_number: The known item number to locate (can be comma-separated list)
         
         Returns:
             Dict with analysis results
@@ -187,12 +197,26 @@ class ReceiptTrainer:
                 config = '--psm 11 --oem 3'
                 text = pytesseract.image_to_string(roi, config=config)
                 
-                # Check if item number is in this region
-                is_present = item_number in text.replace(" ", "").replace("\n", "")
+                # Handle comma-separated list of item numbers
+                if ',' in item_number:
+                    item_numbers = [num.strip() for num in item_number.split(',')]
+                else:
+                    item_numbers = [item_number.strip()]
+                    
+                # Check if any item number is in this region
+                cleaned_text = text.replace(" ", "").replace("\n", "")
+                is_present = False
+                found_numbers = []
                 
+                for num in item_numbers:
+                    if num in cleaned_text:
+                        is_present = True
+                        found_numbers.append(num)
+                    
                 region_result = {
                     "region": region["name"],
                     "contains_item_number": is_present,
+                    "found_numbers": found_numbers,
                     "relative_coords": {
                         "top": y / height,
                         "left": x / width,
@@ -215,39 +239,50 @@ class ReceiptTrainer:
             digit_config = '--psm 11 --oem 3'
             all_text = pytesseract.image_to_string(img, config=digit_config)
             
-            # Try to find the context around the item number
+            # Try to find the context around the item numbers
             patterns = []
-            for line in all_text.split('\n'):
-                if item_number in line.replace(" ", ""):
-                    # Found the line containing the item number
+            
+            # Handle comma-separated list of item numbers again for pattern finding
+            if ',' in item_number:
+                item_numbers = [num.strip() for num in item_number.split(',')]
+            else:
+                item_numbers = [item_number.strip()]
+                
+            # Search for patterns for each item number
+            for single_item_number in item_numbers:
+                for line in all_text.split('\n'):
                     clean_line = line.replace(" ", "")
-                    idx = clean_line.find(item_number)
-                    
-                    # Extract characters before and after (if any)
-                    chars_before = clean_line[:idx][-3:] if idx > 0 else ""
-                    chars_after = clean_line[idx+len(item_number):][:3] if idx + len(item_number) < len(clean_line) else ""
-                    
-                    if chars_before:
-                        pattern = {
-                            "type": "prefix",
-                            "value": chars_before,
-                            "context": line
-                        }
-                        patterns.append(pattern)
+                    if single_item_number in clean_line:
+                        # Found the line containing the item number
+                        idx = clean_line.find(single_item_number)
                         
-                        # Auto-add this pattern to training data
-                        self.add_pattern("prefix", chars_before)
+                        # Extract characters before and after (if any)
+                        chars_before = clean_line[:idx][-3:] if idx > 0 else ""
+                        chars_after = clean_line[idx+len(single_item_number):][:3] if idx + len(single_item_number) < len(clean_line) else ""
                         
-                    if chars_after:
-                        pattern = {
-                            "type": "suffix",
-                            "value": chars_after,
-                            "context": line
-                        }
-                        patterns.append(pattern)
-                        
-                        # Auto-add this pattern to training data
-                        self.add_pattern("suffix", chars_after)
+                        if chars_before:
+                            pattern = {
+                                "type": "prefix",
+                                "value": chars_before,
+                                "context": line,
+                                "item_number": single_item_number
+                            }
+                            patterns.append(pattern)
+                            
+                            # Auto-add this pattern to training data
+                            self.add_pattern("prefix", chars_before)
+                            
+                        if chars_after:
+                            pattern = {
+                                "type": "suffix",
+                                "value": chars_after,
+                                "context": line,
+                                "item_number": single_item_number
+                            }
+                            patterns.append(pattern)
+                            
+                            # Auto-add this pattern to training data
+                            self.add_pattern("suffix", chars_after)
             
             # Add this example to training data
             self.add_example(item_number, image_path, "Auto-analyzed example")
