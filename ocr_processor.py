@@ -23,7 +23,7 @@ def process_image(image_path):
         logging.info(f"Image file exists, size: {os.path.getsize(image_path)} bytes")
         
         try:
-            # Preprocess the image to generate multiple versions
+            # Simpler preprocessing approach to avoid memory issues
             logging.info("Preprocessing image...")
             
             # Read the image
@@ -35,97 +35,43 @@ def process_image(image_path):
                 scale_factor = 1000 / width
                 img = cv2.resize(img, None, fx=scale_factor, fy=scale_factor, interpolation=cv2.INTER_CUBIC)
             
-            # Apply multiple preprocessing methods
-            preprocessed_images = []
-            
-            # Method 1: Basic grayscale with contrast enhancement
+            # Convert to grayscale
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            equ = cv2.equalizeHist(gray)
-            preprocessed_images.append(equ)
             
-            # Method 2: Adaptive thresholding
-            thresh = cv2.adaptiveThreshold(
+            # Method 1: Adaptive thresholding - works well for receipts
+            processed_img = cv2.adaptiveThreshold(
                 gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
             )
-            preprocessed_images.append(thresh)
             
-            # Method 3: Noise reduction with bilateral filter
-            blur = cv2.bilateralFilter(gray, 9, 75, 75)
-            _, otsu = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            preprocessed_images.append(otsu)
-            
-            # Method 4: Dilation followed by erosion
-            kernel = np.ones((1, 1), np.uint8)
-            dilated = cv2.dilate(thresh, kernel, iterations=1)
-            eroded = cv2.erode(dilated, kernel, iterations=1)
-            preprocessed_images.append(eroded)
-            
-            # Method 5: Sharpening
-            kernel_sharpen = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
-            sharpened = cv2.filter2D(gray, -1, kernel_sharpen)
-            _, sharp_thresh = cv2.threshold(sharpened, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            preprocessed_images.append(sharp_thresh)
-            
-            # Save the preprocessed versions
+            # Save the processed version
             temp_dir = '/tmp/preprocessed'
             os.makedirs(temp_dir, exist_ok=True)
-            for i, processed in enumerate(preprocessed_images):
-                cv2.imwrite(f"{temp_dir}/preprocessed_{i}.png", processed)
+            cv2.imwrite(f"{temp_dir}/processed.png", processed_img)
             
-            logging.info("Preprocessing complete, trying OCR on all versions...")
+            logging.info("Preprocessing complete")
             
-            # Try each preprocessed image and keep the best result
-            best_text = ""
-            best_score = 0
-            
-            for i, processed in enumerate(preprocessed_images):
-                try:
-                    method_name = [
-                        "Histogram Equalization", 
-                        "Adaptive Thresholding", 
-                        "Bilateral + Otsu", 
-                        "Dilation + Erosion", 
-                        "Sharpening"
-                    ][i]
-                    
-                    logging.info(f"Trying OCR with method {i+1}: {method_name}")
-                    
-                    # Apply OCR
-                    current_text = pytesseract.image_to_string(processed)
-                    
-                    # Score based on text length and number of digits (which are important for receipts)
-                    score = len(current_text) + current_text.count("Member#:") * 50 + current_text.count("Operator ID:") * 50
-                    
-                    logging.info(f"Method {i+1} extracted {len(current_text)} chars, score: {score}")
-                    
-                    # Keep the best result
-                    if score > best_score:
-                        best_text = current_text
-                        best_score = score
-                except Exception as method_error:
-                    logging.error(f"Error with method {i+1}: {str(method_error)}")
-            
-            # If all methods failed, try direct OCR on the original image
-            if not best_text:
-                logging.info("All preprocessing methods failed, trying direct OCR...")
-                best_text = pytesseract.image_to_string(img)
-            
-            logging.info(f"OCR complete, best result has {len(best_text)} characters, score: {best_score}")
-            logging.debug(f"Extracted text from image: {best_text[:200]}...")
-            
-            # Also try pytesseract with specific receipt config for better number recognition
+            # Try with receipt-specific configuration
+            receipt_config = '--psm 4 --oem 3'
             try:
-                receipt_config = '--psm 4 --oem 3 -c tessedit_char_whitelist="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz:#$%&*.,-+/\\ "' 
-                receipt_text = pytesseract.image_to_string(preprocessed_images[1], config=receipt_config)
+                logging.info("Applying OCR with receipt-specific configuration...")
+                extracted_text = pytesseract.image_to_string(processed_img, config=receipt_config)
                 
-                # If receipt text is better (contains Member# or Operator ID), use it
-                if ("Member#:" in receipt_text or "Operator ID:" in receipt_text) and len(receipt_text) > 100:
-                    best_text = receipt_text
-                    logging.info("Using receipt-optimized OCR result")
-            except Exception as receipt_error:
-                logging.error(f"Error with receipt config: {str(receipt_error)}")
+                # If it contains key phrases from our receipt, use it
+                if "Member#:" in extracted_text or "Operator ID:" in extracted_text:
+                    logging.info("Receipt-specific OCR successful")
+                    return extracted_text
+            except Exception as config_error:
+                logging.error(f"Error with receipt config: {str(config_error)}")
             
-            return best_text
+            # Fall back to standard OCR if receipt-specific failed
+            logging.info("Applying standard OCR...")
+            extracted_text = pytesseract.image_to_string(processed_img)
+            logging.info(f"OCR complete, extracted {len(extracted_text)} characters")
+            
+            # Log the extracted text for debugging
+            logging.debug(f"Extracted text from image: {extracted_text[:200]}...")
+            
+            return extracted_text
             
         except Exception as inner_e:
             logging.error(f"Error during image processing or OCR: {str(inner_e)}")
