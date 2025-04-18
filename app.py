@@ -50,10 +50,31 @@ def upload_file():
     
     if file and allowed_file(file.filename):
         # Create a unique filename to avoid collisions
-        filename = str(uuid.uuid4()) + secure_filename(file.filename)
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
-        logging.info(f"Saved file to {filepath}")
+        try:
+            # Generate a unique filename with UUID to prevent collisions
+            filename = str(uuid.uuid4()) + secure_filename(file.filename)
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            
+            # Ensure the file object is valid
+            if not file or not hasattr(file, 'save'):
+                raise ValueError("Invalid file object")
+                
+            # Save the file with proper error handling
+            file.save(filepath)
+            
+            # Verify the file was saved correctly
+            if not os.path.exists(filepath):
+                raise FileNotFoundError(f"File did not save properly to {filepath}")
+                
+            file_size = os.path.getsize(filepath)
+            if file_size == 0:
+                raise ValueError("Saved file is empty (0 bytes)")
+                
+            logging.info(f"Saved file to {filepath}, size: {file_size} bytes")
+        except Exception as file_error:
+            logging.error(f"Error saving file: {str(file_error)}")
+            flash(f"Error saving uploaded file: {str(file_error)}", 'danger')
+            return redirect(url_for('index'))
         
         try:
             # Process the image with OCR to extract the receipt data
