@@ -14,16 +14,21 @@ def preprocess_image(image_path):
     # Convert to grayscale
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
-    # Apply thresholding
-    _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
+    # Apply adaptive thresholding - better for varying lighting conditions
+    thresh = cv2.adaptiveThreshold(
+        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+    )
     
     # Apply dilation and erosion to remove noise
     kernel = np.ones((1, 1), np.uint8)
     img_dilation = cv2.dilate(thresh, kernel, iterations=1)
     img_erosion = cv2.erode(img_dilation, kernel, iterations=1)
     
-    # Invert back
-    processed = cv2.bitwise_not(img_erosion)
+    # Apply Gaussian blur to reduce noise
+    processed = cv2.GaussianBlur(img_erosion, (3, 3), 0)
+    
+    # Apply Otsu's thresholding as final step
+    _, processed = cv2.threshold(processed, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     
     return processed
 
@@ -79,169 +84,173 @@ def extract_data_from_text(text):
     lines = text.strip().split('\n')
     logging.info(f"Split text into {len(lines)} lines")
     
-    # Regular expressions for data extraction
-    item_number_pattern = r'Item/Dept\s*:\s*(\d+)'
-    description_pattern = r'Description\s*:\s*([A-Za-z0-9\s]+)'
+    # Special patterns for the receipt format we've observed
+    # Based on the image.jpg sample
+    audit_receipt_pattern = r'(Member#:|Operator ID:).*?(\d{6,8}).*?Register.*?(\d+\.\d{2}).*?POS Time.*?(\d{2}:\d{2}:\d{2})'
+    audit_line_pattern = r'(Member#:|Operator ID:).*?(\d{6,8}).*?(\d+\.\d{2})'
+    
+    # Fallback patterns
+    item_pattern = r'(\d{6,8})'
     price_pattern = r'(\d+\.\d{2})'  # Matches prices like 499.99
-    date_pattern = r'Date\s*:\s*(\d{2}/\d{2}/\d{2})'
-    time_pattern = r'POS Time\s*:\s*(\d{2}:\d{2}:\d{2})'
+    date_pattern = r'(\d{2}/\d{2}/\d{2})'
+    time_pattern = r'(\d{2}:\d{2}:\d{2})'
+    
+    # First look for the report date near the top
+    report_date = None
+    for i in range(min(10, len(lines))):
+        date_match = re.search(date_pattern, lines[i])
+        if date_match:
+            report_date = date_match.group(1)
+            logging.info(f"Found report date: {report_date}")
+            break
     
     logging.info("Looking for item data in text")
     
-    # For each line that seems to contain item data
+    # First try to match the specific pattern for our receipt
+    # Looking for the full audit receipt pattern
     for i, line in enumerate(lines):
-        # Check for lines that could contain item data
-        if "Member#:" in line or "Operator ID:" in line:
-            try:
-                # Extract item details from the current line and surrounding lines
-                item_data = {}
-                
-                # Look for item number and description
-                item_match = re.search(r'(\d{6,8})', line)
-                if item_match:
-                    item_data['item_number'] = item_match.group(1)
-                else:
-                    # Try to find item number in surrounding lines
-                    for offset in [-2, -1, 1, 2]:
-                        if i + offset >= 0 and i + offset < len(lines):
-                            item_match = re.search(r'(\d{6,8})', lines[i + offset])
-                            if item_match:
-                                item_data['item_number'] = item_match.group(1)
-                                break
-                
-                # Look for price
-                price_match = re.search(price_pattern, line)
-                if price_match:
-                    item_data['price'] = price_match.group(1)
-                else:
-                    # Try to find price in surrounding lines
-                    for offset in [-2, -1, 1, 2]:
-                        if i + offset >= 0 and i + offset < len(lines):
-                            price_match = re.search(price_pattern, lines[i + offset])
-                            if price_match:
-                                item_data['price'] = price_match.group(1)
-                                break
-                
-                # Look for date
-                date_match = re.search(r'Date\s*:\s*(\d{2}/\d{2}/\d{2})', line)
-                if not date_match:
-                    date_match = re.search(r'(\d{2}/\d{2}/\d{2})', line)
-                if date_match:
-                    item_data['date'] = date_match.group(1)
-                else:
-                    # Try to find date in surrounding lines
-                    for offset in [-2, -1, 1, 2]:
-                        if i + offset >= 0 and i + offset < len(lines):
-                            date_match = re.search(r'Date\s*:\s*(\d{2}/\d{2}/\d{2})', lines[i + offset])
-                            if not date_match:
-                                date_match = re.search(r'(\d{2}/\d{2}/\d{2})', lines[i + offset])
-                            if date_match:
-                                item_data['date'] = date_match.group(1)
-                                break
-                
-                # Look for time
-                time_match = re.search(r'POS Time\s*:\s*(\d{2}:\d{2}:\d{2})', line)
-                if not time_match:
-                    time_match = re.search(r'(\d{2}:\d{2}:\d{2})', line)
-                if time_match:
-                    item_data['time'] = time_match.group(1)
-                else:
-                    # Try to find time in surrounding lines
-                    for offset in [-2, -1, 1, 2]:
-                        if i + offset >= 0 and i + offset < len(lines):
-                            time_match = re.search(r'POS Time\s*:\s*(\d{2}:\d{2}:\d{2})', lines[i + offset])
-                            if not time_match:
-                                time_match = re.search(r'(\d{2}:\d{2}:\d{2})', lines[i + offset])
-                            if time_match:
-                                item_data['time'] = time_match.group(1)
-                                break
-                
-                # Only add if we have at least an item number and price
-                if 'item_number' in item_data and 'price' in item_data:
-                    # Add missing fields with empty values
-                    for field in ['item_number', 'price', 'date', 'time']:
-                        if field not in item_data:
-                            item_data[field] = ''
-                    
-                    # Try to extract a description if available
-                    desc_match = None
-                    for offset in [-2, -1, 0, 1, 2]:
-                        if i + offset >= 0 and i + offset < len(lines):
-                            desc_line = lines[i + offset]
-                            if "Description" in desc_line:
-                                desc_parts = desc_line.split("Description")
-                                if len(desc_parts) > 1:
-                                    desc_match = desc_parts[1].strip()
-                                    break
-                    
-                    if desc_match:
-                        item_data['description'] = desc_match
-                    else:
-                        item_data['description'] = f"Item {item_data['item_number']}"
-                    
-                    items.append(item_data)
-            except Exception as e:
-                logging.error(f"Error extracting data from line {i}: {str(e)}")
-                continue
+        matches = re.search(audit_receipt_pattern, line)
+        if matches:
+            item_data = {
+                'item_number': matches.group(2),
+                'price': matches.group(3),
+                'date': report_date or '',
+                'time': matches.group(4),
+                'description': f"Item {matches.group(2)}"
+            }
+            items.append(item_data)
+            logging.info(f"Found item with complete pattern: {item_data}")
     
-    # If no items were found, try a different approach
-    if not items:
-        logging.info("No items found using primary method, trying fallback pattern matching")
+    # If we found items using the full pattern, return them
+    if items:
+        logging.info(f"Found {len(items)} items using complete audit receipt pattern")
+        return items
+    
+    # Try to match the simpler pattern
+    for i, line in enumerate(lines):
+        matches = re.search(audit_line_pattern, line)
+        if matches:
+            # Try to find time in this line or next
+            time_match = re.search(time_pattern, line)
+            time_value = ''
+            if time_match:
+                time_value = time_match.group(1)
+            else:
+                # Look for time in the next line
+                if i < len(lines) - 1:
+                    time_match = re.search(time_pattern, lines[i+1])
+                    if time_match:
+                        time_value = time_match.group(1)
+            
+            item_data = {
+                'item_number': matches.group(2),
+                'price': matches.group(3),
+                'date': report_date or '',
+                'time': time_value,
+                'description': f"Item {matches.group(2)}"
+            }
+            items.append(item_data)
+            logging.info(f"Found item with simplified pattern: {item_data}")
+    
+    # If we found items using the simplified pattern, return them
+    if items:
+        logging.info(f"Found {len(items)} items using simplified audit receipt pattern")
+        return items
+    
+    # If no items were found, try a different approach - more specific to the Refund Audit format
+    logging.info("No items found using audit patterns, trying refund receipt pattern matching")
+    
+    # Look for rows of text that might contain items
+    item_rows = []
+    in_item_section = False
+    for line in lines:
+        # Look for the start of item list section
+        if "Item #" in line or "Item/Dept" in line:
+            in_item_section = True
+            continue
         
-        # Try a more relaxed approach by looking for any digit sequences that could be item numbers
-        item_numbers = re.findall(r'(\d{5,8})', text)
-        prices = re.findall(r'(\d+\.\d{2})', text)
-        dates = re.findall(r'(\d{1,2}/\d{1,2}/\d{2,4})', text)
-        times = re.findall(r'(\d{1,2}:\d{2}(?::\d{2})?)', text)
+        # Skip until we're in the item section
+        if not in_item_section:
+            continue
         
-        logging.info(f"Found {len(item_numbers)} potential item numbers")
-        logging.info(f"Found {len(prices)} potential prices")
-        logging.info(f"Found {len(dates)} potential dates")
-        logging.info(f"Found {len(times)} potential times")
+        # Check if this line could be an item row (contains item number and price)
+        item_match = re.search(item_pattern, line)
+        price_match = re.search(price_pattern, line)
         
-        # If we have at least item numbers and prices, create items
-        if item_numbers and prices:
-            # Match as many items as we can
-            count = min(len(item_numbers), len(prices))
-            for i in range(count):
+        if item_match and price_match:
+            item_rows.append(line)
+    
+    # Process each potential item row
+    for row in item_rows:
+        item_match = re.search(item_pattern, row)
+        price_match = re.search(price_pattern, row)
+        
+        if item_match and price_match:
+            item_data = {
+                'item_number': item_match.group(1),
+                'price': price_match.group(1),
+                'date': report_date or '',
+                'time': '',
+                'description': f"Item {item_match.group(1)}"
+            }
+            items.append(item_data)
+    
+    # If we found items using item rows pattern, return them
+    if items:
+        logging.info(f"Found {len(items)} items using item rows pattern")
+        return items
+    
+    # If no items were found yet, try a more generic approach
+    logging.info("No items found using specific patterns, trying generic pattern matching")
+    
+    # Try looking for item numbers paired with prices anywhere in the text
+    item_numbers = re.findall(r'(\d{6,8})', text)
+    prices = re.findall(r'(\d+\.\d{2})', text)
+    
+    logging.info(f"Found {len(item_numbers)} potential item numbers")
+    logging.info(f"Found {len(prices)} potential prices")
+    
+    # Find all dates and times regardless of format
+    dates = re.findall(r'(\d{1,2}/\d{1,2}/\d{2,4})', text)
+    times = re.findall(r'(\d{1,2}:\d{2}(?::\d{2})?)', text)
+    
+    # If we have at least some item numbers and prices, try to pair them
+    if item_numbers and prices:
+        # For up to 20 items
+        count = min(len(item_numbers), len(prices), 20)
+        
+        # Try to match items and prices that appear close together in the text
+        for i in range(count):
+            item_number = item_numbers[i]
+            # Find the position of this item number in the text
+            item_pos = text.find(item_number)
+            
+            # Find the closest price to this item
+            closest_price = None
+            closest_distance = float('inf')
+            
+            for price in prices:
+                price_pos = text.find(price)
+                distance = abs(price_pos - item_pos)
+                
+                if distance < closest_distance and distance < 200:  # Within reasonable proximity
+                    closest_price = price
+                    closest_distance = distance
+            
+            if closest_price:
                 item_data = {
-                    'item_number': item_numbers[i],
-                    'price': prices[i],
-                    'description': f"Item {item_numbers[i]}"
+                    'item_number': item_number,
+                    'price': closest_price,
+                    'date': report_date or (dates[0] if dates else ''),
+                    'time': times[0] if times else '',
+                    'description': f"Item {item_number}"
                 }
                 
-                # Add date and time if available
-                if i < len(dates):
-                    item_data['date'] = dates[i]
-                else:
-                    item_data['date'] = ''
-                    
-                if i < len(times):
-                    item_data['time'] = times[i]
-                else:
-                    item_data['time'] = ''
-                
-                items.append(item_data)
-            
-            logging.info(f"Created {count} items using fallback method")
+                # Check if we already have this item to avoid duplicates
+                if not any(item['item_number'] == item_number for item in items):
+                    items.append(item_data)
         
-        # If still no items, try an even more aggressive pattern match
-        if not items:
-            logging.info("Trying most aggressive pattern matching")
-            # Look for patterns like: ItemNumber Price Date Time
-            pattern = r'(\d{6,8}).*?(\d+\.\d{2}).*?(\d{2}/\d{2}/\d{2}).*?(\d{2}:\d{2}:\d{2})'
-            matches = re.findall(pattern, text)
-            
-            for match in matches:
-                items.append({
-                    'item_number': match[0],
-                    'price': match[1],
-                    'date': match[2],
-                    'time': match[3],
-                    'description': f"Item {match[0]}"
-                })
-            
-            logging.info(f"Found {len(matches)} items using aggressive pattern matching")
+        logging.info(f"Created {len(items)} items using proximity matching")
     
     # If we still have no items, create at least one default item
     if not items:
@@ -257,5 +266,15 @@ def extract_data_from_text(text):
     logging.info(f"Extracted {len(items)} items from text")
     for i, item in enumerate(items):
         logging.debug(f"Item {i+1}: {item}")
+    
+    # Extract period from date if available
+    for item in items:
+        if 'date' in item and item['date'] and '/' in item['date']:
+            try:
+                month = item['date'].split('/')[0]
+                if month.isdigit():
+                    item['period'] = f"P{month.zfill(2)}"
+            except Exception:
+                pass
     
     return items
