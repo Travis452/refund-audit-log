@@ -9,7 +9,7 @@ from datetime import datetime
 # This function is now integrated into process_image
 
 def process_image(image_path):
-    """Process the image with OCR to extract text."""
+    """Process the image with OCR to extract text, with extra focus on item numbers."""
     try:
         # Configure logging
         logging.basicConfig(level=logging.DEBUG)
@@ -22,68 +22,95 @@ def process_image(image_path):
         
         logging.info(f"Image file exists, size: {os.path.getsize(image_path)} bytes")
         
+        # Define item numbers to find in the image - we'll try to detect them through OCR
+        # but need to implement a better processing approach specifically for numbers
+        ocr_results = []
+        
         try:
-            # Simpler preprocessing approach to avoid memory issues
-            logging.info("Preprocessing image...")
-            
             # Read the image
             img = cv2.imread(image_path)
+            if img is None:
+                logging.error("Failed to read image - it may be corrupted or in an unsupported format")
+                # Return a fallback message to avoid crashing
+                return "Error: Could not process image. It may be corrupted or in an unsupported format."
             
-            # Resize image if it's too small (helps improve OCR)
-            height, width = img.shape[:2]
-            if width < 1000:
-                scale_factor = 1000 / width
-                img = cv2.resize(img, None, fx=scale_factor, fy=scale_factor, interpolation=cv2.INTER_CUBIC)
+            # Create a working copy
+            original_img = img.copy()
             
             # Convert to grayscale
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            gray = cv2.cvtColor(original_img, cv2.COLOR_BGR2GRAY)
             
-            # Method 1: Adaptive thresholding - works well for receipts
-            processed_img = cv2.adaptiveThreshold(
+            # Try multiple preprocessing techniques specifically for number recognition
+            
+            # Technique 1: Basic thresholding for clear text
+            _, binary = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
+            
+            # Technique 2: Adaptive thresholding for receipt-like documents
+            adaptive = cv2.adaptiveThreshold(
                 gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
             )
             
-            # Save the processed version
+            # Technique 3: Otsu's thresholding for better separation
+            _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            
+            # Store the preprocessed images
+            preprocessed_imgs = [binary, adaptive, otsu]
+            
+            # Save for debugging
             temp_dir = '/tmp/preprocessed'
             os.makedirs(temp_dir, exist_ok=True)
-            cv2.imwrite(f"{temp_dir}/processed.png", processed_img)
             
-            logging.info("Preprocessing complete")
+            for i, p_img in enumerate(preprocessed_imgs):
+                cv2.imwrite(f"{temp_dir}/processed_{i}.png", p_img)
             
-            # Try with receipt-specific configuration
-            receipt_config = '--psm 4 --oem 3'
+            # OCR optimized for digit recognition
+            # We'll use a custom config focused on digits and test it on each preprocessed image
+            digit_config = '--psm 11 --oem 3 -c tessedit_char_whitelist=0123456789'
+            
+            # For each preprocessed image, run OCR
+            for i, p_img in enumerate(preprocessed_imgs):
+                try:
+                    # Get text from the image
+                    ocr_text = pytesseract.image_to_string(p_img)
+                    ocr_results.append(ocr_text)
+                    
+                    # Also try digit-specific OCR to capture item numbers
+                    # This focuses just on finding sequences of digits
+                    digit_text = pytesseract.image_to_string(p_img, config=digit_config)
+                    ocr_results.append(digit_text)
+                    
+                    logging.info(f"OCR technique {i+1} extracted {len(ocr_text)} characters")
+                except Exception as ocr_error:
+                    logging.error(f"OCR technique {i+1} failed: {str(ocr_error)}")
+            
+            # Also try directly on grayscale to catch anything we missed
             try:
-                logging.info("Applying OCR with receipt-specific configuration...")
-                extracted_text = pytesseract.image_to_string(processed_img, config=receipt_config)
+                ocr_results.append(pytesseract.image_to_string(gray))
+            except Exception:
+                pass
                 
-                # If it contains key phrases from our receipt, use it
-                if "Member#:" in extracted_text or "Operator ID:" in extracted_text:
-                    logging.info("Receipt-specific OCR successful")
-                    return extracted_text
-            except Exception as config_error:
-                logging.error(f"Error with receipt config: {str(config_error)}")
+            # Combine all OCR results
+            combined_text = "\n".join(ocr_results)
+            logging.info(f"Combined OCR text length: {len(combined_text)}")
             
-            # Fall back to standard OCR if receipt-specific failed
-            logging.info("Applying standard OCR...")
-            extracted_text = pytesseract.image_to_string(processed_img)
-            logging.info(f"OCR complete, extracted {len(extracted_text)} characters")
-            
-            # Log the extracted text for debugging
-            logging.debug(f"Extracted text from image: {extracted_text[:200]}...")
-            
-            return extracted_text
+            # Return the combined OCR results for further processing
+            return combined_text
             
         except Exception as inner_e:
             logging.error(f"Error during image processing or OCR: {str(inner_e)}")
-            # Try a direct OCR approach without preprocessing as fallback
-            logging.info("Attempting direct OCR without preprocessing as fallback...")
-            extracted_text = pytesseract.image_to_string(cv2.imread(image_path))
-            logging.info(f"Direct OCR complete, extracted {len(extracted_text)} characters")
-            return extracted_text
+            # Fall back to basic OCR if everything else fails
+            try:
+                logging.info("Attempting direct OCR without preprocessing as final fallback...")
+                extracted_text = pytesseract.image_to_string(cv2.imread(image_path))
+                return extracted_text
+            except:
+                # If that fails too, return an error message
+                return "Error: Failed to process image after multiple attempts."
             
     except Exception as e:
         logging.error(f"Error in process_image: {str(e)}")
-        raise e
+        # Return a message instead of raising to avoid crashing
+        return f"Error processing image: {str(e)}"
 
 def extract_data_from_text(text):
     """Extract structured data from OCR text."""
