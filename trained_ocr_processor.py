@@ -22,7 +22,9 @@ logger = logging.getLogger(__name__)
 
 # Constants
 TRAINING_DATA_FILE = 'trained_item_locations.json'
+# Set up specialized OCR config for item numbers
 DEFAULT_CONFIG = '--psm 11 --oem 3 -c tessedit_char_whitelist=0123456789'
+ITEM_NUMBER_CONFIG = '--psm 6 --oem 3 -c tessedit_char_whitelist=0123456789'
 
 class TrainedOCRProcessor:
     """OCR processor that leverages training data for better item number recognition"""
@@ -49,12 +51,17 @@ class TrainedOCRProcessor:
         """Get regions of interest from training data"""
         regions = self.training_data.get("regions", [])
         if not regions:
-            # If no trained regions, use default regions (full image divided into sections)
+            # If no trained regions, focus on the left side of the image for item numbers
             return [
-                {"name": "top", "location": {"top": 0, "left": 0, "width": 1.0, "height": 0.25}},
-                {"name": "upper_middle", "location": {"top": 0.25, "left": 0, "width": 1.0, "height": 0.25}},
-                {"name": "lower_middle", "location": {"top": 0.5, "left": 0, "width": 1.0, "height": 0.25}},
-                {"name": "bottom", "location": {"top": 0.75, "left": 0, "width": 1.0, "height": 0.25}}
+                {"name": "top_left", "location": {"top": 0, "left": 0, "width": 0.33, "height": 0.25}},
+                {"name": "upper_middle_left", "location": {"top": 0.25, "left": 0, "width": 0.33, "height": 0.25}},
+                {"name": "lower_middle_left", "location": {"top": 0.5, "left": 0, "width": 0.33, "height": 0.25}},
+                {"name": "bottom_left", "location": {"top": 0.75, "left": 0, "width": 0.33, "height": 0.25}},
+                # For completeness, also include the full width sections but with lower priority
+                {"name": "full_top", "location": {"top": 0, "left": 0, "width": 1.0, "height": 0.25}},
+                {"name": "full_upper_middle", "location": {"top": 0.25, "left": 0, "width": 1.0, "height": 0.25}},
+                {"name": "full_lower_middle", "location": {"top": 0.5, "left": 0, "width": 1.0, "height": 0.25}},
+                {"name": "full_bottom", "location": {"top": 0.75, "left": 0, "width": 1.0, "height": 0.25}}
             ]
         return regions
     
@@ -103,6 +110,12 @@ class TrainedOCRProcessor:
                 region_width = int(location.get("width", 1.0) * width)
                 region_height = int(location.get("height", 1.0) * height)
                 
+                # Override to focus on left side of the receipt for item numbers
+                if "left" not in location:
+                    # If not explicitly defined, focus on the left third of the width
+                    left = 0
+                    region_width = int(width * 0.33)  # Just the left third of the receipt
+                
                 # Ensure coordinates are within image bounds
                 top = max(0, min(top, height - 1))
                 left = max(0, min(left, width - 1))
@@ -112,9 +125,8 @@ class TrainedOCRProcessor:
                 # Extract region of interest
                 roi = img[top:top+region_height, left:left+region_width]
                 
-                # Process this region
-                config = DEFAULT_CONFIG
-                text = pytesseract.image_to_string(roi, config=config)
+                # Process this region with specialized config for item numbers
+                text = pytesseract.image_to_string(roi, config=ITEM_NUMBER_CONFIG)
                 
                 # Extract potential item numbers based on trained patterns
                 patterns = self.get_trained_patterns()
@@ -127,7 +139,17 @@ class TrainedOCRProcessor:
                         "confidence": 0.9  # Higher confidence for numbers matching trained patterns
                     })
                 
-                # Also look for any 6-12 digit numbers as potential item numbers
+                # Look for 7-digit numbers as potential item numbers (common format)
+                seven_digit_numbers = re.findall(r'\b\d{7}\b', text)
+                for number in seven_digit_numbers:
+                    if number not in [x["item_number"] for x in potential_numbers]:
+                        potential_numbers.append({
+                            "item_number": number,
+                            "region": region_name,
+                            "confidence": 0.8  # Higher confidence for 7-digit numbers
+                        })
+                
+                # Also look for any 6-12 digit numbers as potential item numbers (but with lower confidence)
                 generic_numbers = re.findall(r'\b\d{6,12}\b', text)
                 for number in generic_numbers:
                     if number not in [x["item_number"] for x in potential_numbers]:
@@ -153,12 +175,28 @@ class TrainedOCRProcessor:
                 
                 return unique_numbers
             
-            # If we didn't find any numbers in trained regions, fall back to processing the full image
-            logger.info("No item numbers found in trained regions, falling back to full image scan")
-            full_text = pytesseract.image_to_string(img, config=DEFAULT_CONFIG)
-            generic_numbers = re.findall(r'\b\d{6,12}\b', full_text)
+            # If we didn't find any numbers in trained regions, fall back to left side of image only
+            logger.info("No item numbers found in trained regions, falling back to left side scan")
             
-            return [{"item_number": num, "region": "full_image", "confidence": 0.3} for num in generic_numbers]
+            # Extract just the left third of the image for item numbers
+            left_region_width = int(width * 0.33)
+            left_region = img[:, 0:left_region_width]
+            
+            # Process with specialized config for item numbers
+            left_text = pytesseract.image_to_string(left_region, config=ITEM_NUMBER_CONFIG)
+            
+            # First look for 7-digit numbers (likely item numbers)
+            seven_digit_numbers = re.findall(r'\b\d{7}\b', left_text)
+            result_items = [{"item_number": num, "region": "left_side", "confidence": 0.7} for num in seven_digit_numbers]
+            
+            # Then include any other 6-12 digit numbers with lower confidence
+            if not seven_digit_numbers:
+                generic_numbers = re.findall(r'\b\d{6,12}\b', left_text)
+                # Filter out numbers we already found
+                generic_numbers = [num for num in generic_numbers if num not in seven_digit_numbers]
+                result_items.extend([{"item_number": num, "region": "left_side", "confidence": 0.3} for num in generic_numbers])
+            
+            return result_items
             
         except Exception as e:
             logger.error(f"Error processing image with trained OCR: {str(e)}")
@@ -180,9 +218,14 @@ class TrainedOCRProcessor:
             
         potential_numbers = []
         
-        # First, look for 6-12 digit numbers
-        number_matches = re.findall(r'\b\d{6,12}\b', text)
-        potential_numbers.extend(number_matches)
+        # First, look specifically for 7-digit numbers (common item number format)
+        seven_digit_matches = re.findall(r'\b\d{7}\b', text)
+        potential_numbers.extend(seven_digit_matches)
+        
+        # Then look for other 6-12 digit numbers excluding the 7-digit ones we already found
+        all_matches = re.findall(r'\b\d{6,12}\b', text)
+        other_matches = [num for num in all_matches if num not in seven_digit_matches and len(num) != 7]
+        potential_numbers.extend(other_matches)
         
         # Then apply each pattern
         for pattern in patterns:
