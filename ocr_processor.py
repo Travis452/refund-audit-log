@@ -62,6 +62,76 @@ def process_quick(image_path):
         logging.error(f"Error in quick process: {str(e)}")
         return f"Error: Quick processing failed: {str(e)}"
 
+def extract_item_numbers_direct(image_path):
+    """Directly extract item numbers from receipt using specialized approach"""
+    try:
+        # Read image with OpenCV (needed for some preprocessing)
+        img = cv2.imread(image_path, 0)  # Grayscale
+        
+        if img is None:
+            return []
+            
+        # Resize if too large 
+        h, w = img.shape
+        if max(h, w) > 1200:
+            scale = 1200 / max(h, w)
+            img = cv2.resize(img, (int(w * scale), int(h * scale)))
+            
+        # Apply multiple threshold methods for better character separation
+        _, binary1 = cv2.threshold(img, 150, 255, cv2.THRESH_BINARY)
+        adaptive = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+        
+        # Use both images for better results
+        item_numbers = []
+        
+        # Config specifically for receipt item numbers
+        # Treat the image as having multiple lines of isolated numbers
+        item_number_config = '--psm 11 --oem 3 -c tessedit_char_whitelist=0123456789'
+        
+        # Process different regions of the image to increase chances of finding item numbers
+        # Process the entire image at low resolution
+        full_text = pytesseract.image_to_string(binary1, config=item_number_config)
+        
+        # Process middle section where item details usually appear
+        middle_section = img[h//4:3*h//4, w//5:4*w//5]
+        middle_text = pytesseract.image_to_string(middle_section, config=item_number_config)
+        
+        # Also try with adaptive threshold on middle
+        middle_adaptive = adaptive[h//4:3*h//4, w//5:4*w//5]
+        adaptive_text = pytesseract.image_to_string(middle_adaptive, config=item_number_config)
+        
+        # Combine all text
+        all_text = full_text + "\n" + middle_text + "\n" + adaptive_text
+        
+        # Extract potential item numbers with regex
+        # Look for 6-9 digit numbers which are typical item/SKU numbers
+        import re
+        pattern = r'\b\d{6,9}\b'
+        candidates = re.findall(pattern, all_text)
+        
+        # Filter out likely non-item numbers
+        for num in candidates:
+            # Skip pure repeated digits (likely noise or separators)
+            if len(set(num)) <= 2:  # Only 1 or 2 unique digits
+                continue
+                
+            # Skip if starts with many zeros
+            if num.startswith('000'):
+                continue
+                
+            # Skip common date-like patterns
+            if len(num) == 8 and (num.startswith('20') or num.startswith('19')):
+                continue
+                
+            item_numbers.append(num)
+            
+        # Get most reliable matches (unique numbers)
+        return list(set(item_numbers))
+        
+    except Exception as e:
+        logging.error(f"Error in direct item number extraction: {str(e)}")
+        return []
+
 def process_image(image_path):
     """Ultra-simplified image processing with OCR focusing only on finding item numbers."""
     try:
@@ -78,7 +148,14 @@ def process_image(image_path):
         
         # Process the image
         try:
-            # Use PIL for faster processing
+            # First try specialized direct item number extraction
+            direct_item_numbers = extract_item_numbers_direct(image_path)
+            
+            # If we found item numbers, add them to the text
+            direct_item_numbers_text = "\n".join(direct_item_numbers)
+            logging.info(f"Direct item number extraction found: {direct_item_numbers}")
+            
+            # Use PIL for faster processing of the full image
             pil_img = Image.open(image_path)
             
             # Convert to grayscale
@@ -112,8 +189,8 @@ def process_image(image_path):
             general_text = pytesseract.image_to_string(pil_img, config=general_config)
             logging.info(f"General OCR took {time.time() - start_time:.2f} seconds")
             
-            # Combine results
-            combined_text = digits_text + "\n" + general_text
+            # Combine results, prioritizing our direct extracted item numbers
+            combined_text = direct_item_numbers_text + "\n" + digits_text + "\n" + general_text
             
             # Cancel the timeout
             signal.alarm(0)
@@ -146,7 +223,7 @@ def process_image(image_path):
                 
                 # Use quickest OCR config
                 pytesseract.pytesseract.timeout = 3000  # 3 seconds max
-                digit_config = '--psm 6 --oem 3 -c tessedit_char_whitelist=0123456789'
+                digit_config = '--psm 11 --oem 3 -c tessedit_char_whitelist=0123456789'
                 result = pytesseract.image_to_string(center, config=digit_config)
                 
                 return result
@@ -292,13 +369,35 @@ def extract_data_from_text(text):
         
         return items
     
-    # Second pass: If the specific patterns didn't work, fall back to more generic detection
-    logging.info("No items found with specific patterns, trying more generic detection")
+    # Process directly extracted item numbers in the text first
+    # These are most likely to be actual item numbers rather than noise
     
-    # Look for lines that contain both an 8-digit number and a price
-    item_pattern = r'(\d{6,8})'
-    price_pattern = r'(\d+\.\d{2})'
-    time_pattern = r'(\d{2}:\d{2}:\d{2})'
+    # Look at the first 10 lines which is where the direct item numbers are placed
+    for i in range(min(10, len(lines))):
+        line = lines[i].strip()
+        # Look for lines that contain only a 6-9 digit number - these are our direct extractions
+        if re.match(r'^\d{6,9}$', line):
+            item_number = line
+            if item_number not in processed_items:
+                processed_items.add(item_number)
+                item_data = {
+                    'item_number': item_number,
+                    'price': '0.00',  # Unknown price
+                    'date': report_date or datetime.now().strftime('%m/%d/%y'),
+                    'time': datetime.now().strftime('%H:%M:%S'),
+                    'description': f"Item {item_number}"
+                }
+                items.append(item_data)
+                logging.info(f"Found directly extracted item number: {item_number}")
+    
+    # Second pass: If the specific patterns and direct extraction didn't work, fall back to generic detection
+    if not items:
+        logging.info("No items found with specific patterns, trying more generic detection")
+        
+        # Look for lines that contain both a number and a price
+        item_pattern = r'(\d{6,9})'  # Look for 6-9 digit numbers
+        price_pattern = r'(\d+\.\d{2})'
+        time_pattern = r'(\d{2}:\d{2}:\d{2})'
     
     for line in lines:
         # Skip short lines that likely don't contain full item info
