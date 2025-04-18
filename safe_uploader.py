@@ -132,9 +132,10 @@ def process_receipt_image_safe(file, app, temp_dir="/tmp"):
         logger.error(f"Error processing file: {str(e)}")
         return False, f"Error processing file: {str(e)}"
     finally:
-        # Clean up the file regardless of success or failure
+        # Keep the file for debugging - don't delete it
         try:
             if os.path.exists(filepath):
-                os.remove(filepath)
+                logger.info(f"Preserving uploaded file for debugging: {filepath}")
+                # Don't remove the file so we can inspect it
         except Exception as cleanup_error:
-            logger.error(f"Error cleaning up temporary file: {str(cleanup_error)}")
+            logger.error(f"Error accessing temporary file: {str(cleanup_error)}")
