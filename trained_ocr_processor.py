@@ -125,8 +125,16 @@ class TrainedOCRProcessor:
                 # Extract region of interest
                 roi = img[top:top+region_height, left:left+region_width]
                 
-                # Process this region with specialized config for item numbers
-                text = pytesseract.image_to_string(roi, config=ITEM_NUMBER_CONFIG)
+                # Process this region, check if ROI is valid
+                if roi.size == 0:
+                    logger.warning(f"Skipping empty region {region_name}")
+                    text = ""
+                else:
+                    try:
+                        text = pytesseract.image_to_string(roi, config=ITEM_NUMBER_CONFIG)
+                    except Exception as e:
+                        logger.warning(f"Error processing region {region_name}: {str(e)}")
+                        text = ""
                 
                 # Extract potential item numbers based on trained patterns
                 patterns = self.get_trained_patterns()
@@ -182,8 +190,16 @@ class TrainedOCRProcessor:
             left_region_width = int(width * 0.33)
             left_region = img[:, 0:left_region_width]
             
-            # Process with specialized config for item numbers
-            left_text = pytesseract.image_to_string(left_region, config=ITEM_NUMBER_CONFIG)
+            # Process with specialized config for item numbers, with error handling
+            try:
+                if left_region.size == 0:
+                    logger.warning("Left region is empty, skipping OCR")
+                    left_text = ""
+                else:
+                    left_text = pytesseract.image_to_string(left_region, config=ITEM_NUMBER_CONFIG)
+            except Exception as e:
+                logger.warning(f"Error processing left region: {str(e)}")
+                left_text = ""
             
             # First look for 7-digit numbers (likely item numbers)
             seven_digit_numbers = re.findall(r'\b\d{7}\b', left_text)
