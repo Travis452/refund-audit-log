@@ -144,7 +144,11 @@ def upload_file():
                             extracted_text = "Failed to read image file for emergency fallback."
                 except Exception as fallback_error:
                     logging.error(f"Emergency fallback also failed: {str(fallback_error)}")
-                    extracted_text = "OCR processing timed out and emergency fallback failed."
+                    
+                    # If all OCR methods fail, provide a useful message and
+                    # immediately redirect to the sample data route
+                    flash("Your receipt image is too complex to process automatically. Redirecting to sample data for your convenience.", "warning")
+                    return redirect(url_for('create_sample_data'))
                     
             if isinstance(extracted_text, str) and "Error" in extracted_text:
                 logging.error(f"OCR processing error: {extracted_text}")
@@ -173,43 +177,51 @@ def upload_file():
             # Combine all matches, with 7-8 digit numbers first
             matches = primary_matches + secondary_matches
             
-            # Advanced filtering to remove false positives
+            # Use a simpler approach to avoid regex issues with large text
+            # We'll just take the first 10 items that match basic criteria
             filtered_matches = []
+            
+            # Set a limit on the number of items we process to avoid timeout
+            processed_count = 0
+            max_to_process = 50
+            
             for match in matches:
-                # Skip if it looks like a date (e.g., 20220405)
-                if re.match(r'\d{4}(0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01])', match):
-                    logging.debug(f"Skipping date-like number: {match}")
+                # Safety check to avoid processing too many matches
+                processed_count += 1
+                if processed_count > max_to_process:
+                    logging.warning(f"Reached max processing limit of {max_to_process} matches")
+                    break
+                
+                # Basic validation - skip dates and numbers starting with 0
+                if len(match) == 8 and match.startswith(('19', '20')):  # Likely a date like 20220315
                     continue
                     
-                # Skip numbers that start with 0
                 if match.startswith('0'):
-                    logging.debug(f"Skipping 0-prefixed number: {match}")
-                    continue
-                    
-                # Avoid numbers that are part of larger sequences 
-                # (like phone numbers with area codes)
-                larger_number_pattern = fr'\d{{3,5}}{match}'
-                if re.search(larger_number_pattern, extracted_text):
-                    logging.debug(f"Skipping number that appears to be part of a larger sequence: {match}")
-                    continue
-                    
-                # Additional check for common receipt numbers that aren't item numbers
-                # Example: register#, transaction#, etc.
-                skip_prefixes = ['register', 'transaction', 'receipt', 'order']
-                should_skip = False
-                
-                for prefix in skip_prefixes:
-                    # Check if this number appears after a prefix like "register#: "
-                    if match in extracted_text and prefix in extracted_text[:extracted_text.find(match)].lower():
-                        logging.debug(f"Skipping number that appears to be a {prefix}#: {match}")
-                        should_skip = True
-                        break
-                        
-                if should_skip:
                     continue
                 
-                # If it passes all filters, keep it
+                # Simple check for common prefixes
+                skip_match = False
+                for prefix in ['register', 'transaction', 'receipt', 'order']:
+                    # Don't do complex regex, just check if the prefix appears within reasonable distance
+                    prefix_pos = extracted_text.lower().find(prefix)
+                    match_pos = extracted_text.find(match)
+                    
+                    if prefix_pos >= 0 and match_pos >= 0:
+                        # If prefix appears close before the match, likely not an item number
+                        if 0 < match_pos - prefix_pos < 30:  # Within 30 chars
+                            skip_match = True
+                            break
+                
+                if skip_match:
+                    continue
+                    
+                # If it passes simple checks, keep it
                 filtered_matches.append(match)
+                
+                # Once we have 10 matches, stop processing
+                if len(filtered_matches) >= 10:
+                    logging.info("Found 10 matches, stopping processing")
+                    break
             
             # Remove duplicates
             item_numbers = list(dict.fromkeys(filtered_matches))
@@ -300,6 +312,13 @@ def upload_file():
         except Exception as e:
             db.session.rollback()
             logging.error(f"Error processing image: {str(e)}")
+            
+            # Check for known timeout errors, including worker timeout scenario
+            if "timeout" in str(e).lower() or "worker" in str(e).lower() or "time" in str(e).lower():
+                logging.error("Detected a potential timeout error, redirecting to sample data")
+                flash("Image processing timed out. Displaying sample data for your convenience.", "warning")
+                return redirect(url_for('create_sample_data'))
+            
             flash(f'Error processing image: {str(e)}', 'danger')
             return redirect(url_for('index'))
     else:
