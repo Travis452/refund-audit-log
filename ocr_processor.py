@@ -6,31 +6,7 @@ import os
 import numpy as np
 from datetime import datetime
 
-def preprocess_image(image_path):
-    """Preprocess the image for better OCR results."""
-    # Read the image
-    img = cv2.imread(image_path)
-    
-    # Convert to grayscale
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    
-    # Apply adaptive thresholding - better for varying lighting conditions
-    thresh = cv2.adaptiveThreshold(
-        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
-    )
-    
-    # Apply dilation and erosion to remove noise
-    kernel = np.ones((1, 1), np.uint8)
-    img_dilation = cv2.dilate(thresh, kernel, iterations=1)
-    img_erosion = cv2.erode(img_dilation, kernel, iterations=1)
-    
-    # Apply Gaussian blur to reduce noise
-    processed = cv2.GaussianBlur(img_erosion, (3, 3), 0)
-    
-    # Apply Otsu's thresholding as final step
-    _, processed = cv2.threshold(processed, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    
-    return processed
+# This function is now integrated into process_image
 
 def process_image(image_path):
     """Process the image with OCR to extract text."""
@@ -47,20 +23,110 @@ def process_image(image_path):
         logging.info(f"Image file exists, size: {os.path.getsize(image_path)} bytes")
         
         try:
-            # Preprocess the image
+            # Preprocess the image to generate multiple versions
             logging.info("Preprocessing image...")
-            processed_img = preprocess_image(image_path)
-            logging.info("Preprocessing complete")
             
-            # Apply OCR
-            logging.info("Applying OCR with pytesseract...")
-            extracted_text = pytesseract.image_to_string(processed_img)
-            logging.info(f"OCR complete, extracted {len(extracted_text)} characters")
+            # Read the image
+            img = cv2.imread(image_path)
             
-            # Log the extracted text for debugging
-            logging.debug(f"Extracted text from image: {extracted_text[:200]}...")
+            # Resize image if it's too small (helps improve OCR)
+            height, width = img.shape[:2]
+            if width < 1000:
+                scale_factor = 1000 / width
+                img = cv2.resize(img, None, fx=scale_factor, fy=scale_factor, interpolation=cv2.INTER_CUBIC)
             
-            return extracted_text
+            # Apply multiple preprocessing methods
+            preprocessed_images = []
+            
+            # Method 1: Basic grayscale with contrast enhancement
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            equ = cv2.equalizeHist(gray)
+            preprocessed_images.append(equ)
+            
+            # Method 2: Adaptive thresholding
+            thresh = cv2.adaptiveThreshold(
+                gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+            )
+            preprocessed_images.append(thresh)
+            
+            # Method 3: Noise reduction with bilateral filter
+            blur = cv2.bilateralFilter(gray, 9, 75, 75)
+            _, otsu = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            preprocessed_images.append(otsu)
+            
+            # Method 4: Dilation followed by erosion
+            kernel = np.ones((1, 1), np.uint8)
+            dilated = cv2.dilate(thresh, kernel, iterations=1)
+            eroded = cv2.erode(dilated, kernel, iterations=1)
+            preprocessed_images.append(eroded)
+            
+            # Method 5: Sharpening
+            kernel_sharpen = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
+            sharpened = cv2.filter2D(gray, -1, kernel_sharpen)
+            _, sharp_thresh = cv2.threshold(sharpened, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            preprocessed_images.append(sharp_thresh)
+            
+            # Save the preprocessed versions
+            temp_dir = '/tmp/preprocessed'
+            os.makedirs(temp_dir, exist_ok=True)
+            for i, processed in enumerate(preprocessed_images):
+                cv2.imwrite(f"{temp_dir}/preprocessed_{i}.png", processed)
+            
+            logging.info("Preprocessing complete, trying OCR on all versions...")
+            
+            # Try each preprocessed image and keep the best result
+            best_text = ""
+            best_score = 0
+            
+            for i, processed in enumerate(preprocessed_images):
+                try:
+                    method_name = [
+                        "Histogram Equalization", 
+                        "Adaptive Thresholding", 
+                        "Bilateral + Otsu", 
+                        "Dilation + Erosion", 
+                        "Sharpening"
+                    ][i]
+                    
+                    logging.info(f"Trying OCR with method {i+1}: {method_name}")
+                    
+                    # Apply OCR
+                    current_text = pytesseract.image_to_string(processed)
+                    
+                    # Score based on text length and number of digits (which are important for receipts)
+                    score = len(current_text) + current_text.count("Member#:") * 50 + current_text.count("Operator ID:") * 50
+                    
+                    logging.info(f"Method {i+1} extracted {len(current_text)} chars, score: {score}")
+                    
+                    # Keep the best result
+                    if score > best_score:
+                        best_text = current_text
+                        best_score = score
+                except Exception as method_error:
+                    logging.error(f"Error with method {i+1}: {str(method_error)}")
+            
+            # If all methods failed, try direct OCR on the original image
+            if not best_text:
+                logging.info("All preprocessing methods failed, trying direct OCR...")
+                best_text = pytesseract.image_to_string(img)
+            
+            logging.info(f"OCR complete, best result has {len(best_text)} characters, score: {best_score}")
+            logging.debug(f"Extracted text from image: {best_text[:200]}...")
+            
+            # Also try pytesseract with specific receipt config for better number recognition
+            try:
+                receipt_config = '--psm 4 --oem 3 -c tessedit_char_whitelist="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz:#$%&*.,-+/\\ "' 
+                receipt_text = pytesseract.image_to_string(preprocessed_images[1], config=receipt_config)
+                
+                # If receipt text is better (contains Member# or Operator ID), use it
+                if ("Member#:" in receipt_text or "Operator ID:" in receipt_text) and len(receipt_text) > 100:
+                    best_text = receipt_text
+                    logging.info("Using receipt-optimized OCR result")
+            except Exception as receipt_error:
+                logging.error(f"Error with receipt config: {str(receipt_error)}")
+            
+            return best_text
+            
         except Exception as inner_e:
             logging.error(f"Error during image processing or OCR: {str(inner_e)}")
             # Try a direct OCR approach without preprocessing as fallback
@@ -84,173 +150,219 @@ def extract_data_from_text(text):
     lines = text.strip().split('\n')
     logging.info(f"Split text into {len(lines)} lines")
     
-    # Special patterns for the receipt format we've observed
-    # Based on the image.jpg sample
-    audit_receipt_pattern = r'(Member#:|Operator ID:).*?(\d{6,8}).*?Register.*?(\d+\.\d{2}).*?POS Time.*?(\d{2}:\d{2}:\d{2})'
-    audit_line_pattern = r'(Member#:|Operator ID:).*?(\d{6,8}).*?(\d+\.\d{2})'
-    
-    # Fallback patterns
-    item_pattern = r'(\d{6,8})'
-    price_pattern = r'(\d+\.\d{2})'  # Matches prices like 499.99
-    date_pattern = r'(\d{2}/\d{2}/\d{2})'
-    time_pattern = r'(\d{2}:\d{2}:\d{2})'
-    
-    # First look for the report date near the top
+    # Extract the receipt date (typically near the top)
     report_date = None
+    date_pattern = r'Date:?\s*(\d{2}/\d{2}/\d{2,4})'
     for i in range(min(10, len(lines))):
-        date_match = re.search(date_pattern, lines[i])
+        date_match = re.search(date_pattern, lines[i], re.IGNORECASE)
         if date_match:
             report_date = date_match.group(1)
             logging.info(f"Found report date: {report_date}")
             break
     
+    # If no date found with the specific pattern, try a more generic one
+    if not report_date:
+        for i in range(min(10, len(lines))):
+            date_match = re.search(r'(\d{2}/\d{2}/\d{2,4})', lines[i])
+            if date_match:
+                report_date = date_match.group(1)
+                logging.info(f"Found report date with generic pattern: {report_date}")
+                break
+    
     logging.info("Looking for item data in text")
     
-    # First try to match the specific pattern for our receipt
-    # Looking for the full audit receipt pattern
+    # Patterns specifically designed for your receipt format - updated based on image.jpg
+    member_line_pattern = r'Member#:\s*(\d+).*?(\d+\.\d{2})'
+    operator_line_pattern = r'Operator ID:\s*(\d+).*?(\d+\.\d{2})'
+    
+    # Track which item numbers we've already processed to avoid duplicates
+    processed_items = set()
+    
+    # First pass: Look for Member# and Operator ID lines which contain item numbers and prices
     for i, line in enumerate(lines):
-        matches = re.search(audit_receipt_pattern, line)
-        if matches:
-            item_data = {
-                'item_number': matches.group(2),
-                'price': matches.group(3),
-                'date': report_date or '',
-                'time': matches.group(4),
-                'description': f"Item {matches.group(2)}"
-            }
-            items.append(item_data)
-            logging.info(f"Found item with complete pattern: {item_data}")
-    
-    # If we found items using the full pattern, return them
-    if items:
-        logging.info(f"Found {len(items)} items using complete audit receipt pattern")
-        return items
-    
-    # Try to match the simpler pattern
-    for i, line in enumerate(lines):
-        matches = re.search(audit_line_pattern, line)
-        if matches:
-            # Try to find time in this line or next
-            time_match = re.search(time_pattern, line)
-            time_value = ''
-            if time_match:
-                time_value = time_match.group(1)
-            else:
-                # Look for time in the next line
-                if i < len(lines) - 1:
-                    time_match = re.search(time_pattern, lines[i+1])
-                    if time_match:
-                        time_value = time_match.group(1)
+        # Search for Member# pattern
+        member_match = re.search(member_line_pattern, line)
+        if member_match:
+            item_number = member_match.group(1)
+            price = member_match.group(2)
             
-            item_data = {
-                'item_number': matches.group(2),
-                'price': matches.group(3),
-                'date': report_date or '',
-                'time': time_value,
-                'description': f"Item {matches.group(2)}"
-            }
-            items.append(item_data)
-            logging.info(f"Found item with simplified pattern: {item_data}")
-    
-    # If we found items using the simplified pattern, return them
-    if items:
-        logging.info(f"Found {len(items)} items using simplified audit receipt pattern")
-        return items
-    
-    # If no items were found, try a different approach - more specific to the Refund Audit format
-    logging.info("No items found using audit patterns, trying refund receipt pattern matching")
-    
-    # Look for rows of text that might contain items
-    item_rows = []
-    in_item_section = False
-    for line in lines:
-        # Look for the start of item list section
-        if "Item #" in line or "Item/Dept" in line:
-            in_item_section = True
-            continue
-        
-        # Skip until we're in the item section
-        if not in_item_section:
-            continue
-        
-        # Check if this line could be an item row (contains item number and price)
-        item_match = re.search(item_pattern, line)
-        price_match = re.search(price_pattern, line)
-        
-        if item_match and price_match:
-            item_rows.append(line)
-    
-    # Process each potential item row
-    for row in item_rows:
-        item_match = re.search(item_pattern, row)
-        price_match = re.search(price_pattern, row)
-        
-        if item_match and price_match:
-            item_data = {
-                'item_number': item_match.group(1),
-                'price': price_match.group(1),
-                'date': report_date or '',
-                'time': '',
-                'description': f"Item {item_match.group(1)}"
-            }
-            items.append(item_data)
-    
-    # If we found items using item rows pattern, return them
-    if items:
-        logging.info(f"Found {len(items)} items using item rows pattern")
-        return items
-    
-    # If no items were found yet, try a more generic approach
-    logging.info("No items found using specific patterns, trying generic pattern matching")
-    
-    # Try looking for item numbers paired with prices anywhere in the text
-    item_numbers = re.findall(r'(\d{6,8})', text)
-    prices = re.findall(r'(\d+\.\d{2})', text)
-    
-    logging.info(f"Found {len(item_numbers)} potential item numbers")
-    logging.info(f"Found {len(prices)} potential prices")
-    
-    # Find all dates and times regardless of format
-    dates = re.findall(r'(\d{1,2}/\d{1,2}/\d{2,4})', text)
-    times = re.findall(r'(\d{1,2}:\d{2}(?::\d{2})?)', text)
-    
-    # If we have at least some item numbers and prices, try to pair them
-    if item_numbers and prices:
-        # For up to 20 items
-        count = min(len(item_numbers), len(prices), 20)
-        
-        # Try to match items and prices that appear close together in the text
-        for i in range(count):
-            item_number = item_numbers[i]
-            # Find the position of this item number in the text
-            item_pos = text.find(item_number)
+            # Extract description - it's usually between the item number and price
+            description = ""
+            desc_match = re.search(r'Member#:\s*\d+\s*(.*?)\s*\d+\.\d{2}', line)
+            if desc_match:
+                description = desc_match.group(1).strip()
             
-            # Find the closest price to this item
-            closest_price = None
-            closest_distance = float('inf')
+            # Try to find the date for this item
+            item_date = report_date
+            date_in_line = re.search(r'Date:?\s*(\d{2}/\d{2}/\d{2,4})', line)
+            if date_in_line:
+                item_date = date_in_line.group(1)
             
-            for price in prices:
-                price_pos = text.find(price)
-                distance = abs(price_pos - item_pos)
+            # Look for time information
+            time_match = re.search(r'(\d{2}:\d{2}:\d{2})', line)
+            time_value = time_match.group(1) if time_match else ''
+            
+            # Only add if we haven't seen this item number before
+            if item_number not in processed_items:
+                processed_items.add(item_number)
                 
-                if distance < closest_distance and distance < 200:  # Within reasonable proximity
-                    closest_price = price
-                    closest_distance = distance
+                item_data = {
+                    'item_number': item_number,
+                    'price': price,
+                    'date': item_date or '',
+                    'time': time_value,
+                    'description': description or f"Item {item_number}"
+                }
+                items.append(item_data)
+                logging.info(f"Found item with Member# pattern: {item_data}")
+        
+        # Search for Operator ID pattern
+        operator_match = re.search(operator_line_pattern, line)
+        if operator_match:
+            item_number = operator_match.group(1)
+            price = operator_match.group(2)
             
-            if closest_price:
+            # Extract description
+            description = ""
+            desc_match = re.search(r'Operator ID:\s*\d+\s*(.*?)\s*\d+\.\d{2}', line)
+            if desc_match:
+                description = desc_match.group(1).strip()
+            
+            # Try to find the date for this item
+            item_date = report_date
+            date_in_line = re.search(r'Date:?\s*(\d{2}/\d{2}/\d{2,4})', line)
+            if date_in_line:
+                item_date = date_in_line.group(1)
+            
+            # Look for time information
+            time_match = re.search(r'(\d{2}:\d{2}:\d{2})', line)
+            time_value = time_match.group(1) if time_match else ''
+            
+            # Only add if we haven't seen this item number before
+            if item_number not in processed_items:
+                processed_items.add(item_number)
+                
+                item_data = {
+                    'item_number': item_number,
+                    'price': price,
+                    'date': item_date or '',
+                    'time': time_value,
+                    'description': description or f"Item {item_number}"
+                }
+                items.append(item_data)
+                logging.info(f"Found item with Operator ID pattern: {item_data}")
+    
+    # If we found items using the specific patterns, return them
+    if items:
+        logging.info(f"Found {len(items)} items using Member#/Operator ID patterns")
+        
+        # Extract period from date if available
+        for item in items:
+            if 'date' in item and item['date'] and '/' in item['date']:
+                try:
+                    month = item['date'].split('/')[0]
+                    if month.isdigit():
+                        item['period'] = f"P{month.zfill(2)}"
+                except Exception:
+                    pass
+        
+        return items
+    
+    # Second pass: If the specific patterns didn't work, fall back to more generic detection
+    logging.info("No items found with specific patterns, trying more generic detection")
+    
+    # Look for lines that contain both an 8-digit number and a price
+    item_pattern = r'(\d{6,8})'
+    price_pattern = r'(\d+\.\d{2})'
+    time_pattern = r'(\d{2}:\d{2}:\d{2})'
+    
+    for line in lines:
+        # Skip short lines that likely don't contain full item info
+        if len(line) < 20:
+            continue
+        
+        item_matches = re.findall(item_pattern, line)
+        price_matches = re.findall(price_pattern, line)
+        
+        if item_matches and price_matches:
+            for item_number in item_matches:
+                # Skip if we've already processed this item
+                if item_number in processed_items:
+                    continue
+                
+                processed_items.add(item_number)
+                
+                # Find the closest price to this item number in the line
+                item_pos = line.find(item_number)
+                closest_price = None
+                closest_dist = float('inf')
+                
+                for price in price_matches:
+                    price_pos = line.find(price)
+                    dist = abs(price_pos - item_pos)
+                    if dist < closest_dist:
+                        closest_price = price
+                        closest_dist = dist
+                
+                # Extract description and time if available
+                description = ""
+                time_value = ""
+                
+                # Try to find time in the line
+                time_match = re.search(time_pattern, line)
+                if time_match:
+                    time_value = time_match.group(1)
+                
                 item_data = {
                     'item_number': item_number,
                     'price': closest_price,
-                    'date': report_date or (dates[0] if dates else ''),
-                    'time': times[0] if times else '',
-                    'description': f"Item {item_number}"
+                    'date': report_date or '',
+                    'time': time_value,
+                    'description': description or f"Item {item_number}"
                 }
-                
-                # Check if we already have this item to avoid duplicates
-                if not any(item['item_number'] == item_number for item in items):
-                    items.append(item_data)
+                items.append(item_data)
+                logging.info(f"Found item with generic pattern: {item_data}")
+    
+    # If we still have no items, try a more aggressive approach to extract all possible items
+    if not items:
+        logging.info("No items found with per-line patterns, extracting all possible items")
         
-        logging.info(f"Created {len(items)} items using proximity matching")
+        # Get all item numbers and prices from the entire text
+        all_items = re.findall(item_pattern, text)
+        all_prices = re.findall(price_pattern, text)
+        all_times = re.findall(time_pattern, text)
+        
+        logging.info(f"Found {len(all_items)} potential item numbers and {len(all_prices)} potential prices")
+        
+        # Match items with prices based on proximity in the text
+        count = min(len(all_items), len(all_prices), 50)  # Process up to 50 items
+        
+        for i in range(count):
+            if i >= len(all_items):
+                break
+                
+            item_number = all_items[i]
+            
+            # Skip if we've already processed this item
+            if item_number in processed_items:
+                continue
+                
+            processed_items.add(item_number)
+            
+            # Get the price - either at the same index or find closest
+            price = all_prices[i] if i < len(all_prices) else all_prices[0]
+            
+            # Get time if available
+            time_value = all_times[i] if i < len(all_times) else ""
+            
+            item_data = {
+                'item_number': item_number,
+                'price': price,
+                'date': report_date or '',
+                'time': time_value,
+                'description': f"Item {item_number}"
+            }
+            items.append(item_data)
     
     # If we still have no items, create at least one default item
     if not items:
