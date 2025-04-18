@@ -14,6 +14,7 @@ from main import app, db
 from models import ReportItem, ExportFile
 from ocr_processor import process_image, extract_data_from_text, extract_item_numbers_direct
 from data_exporter import export_to_excel, export_to_google_sheets
+from receipt_trainer import ReceiptTrainer
 
 # Configure upload folder
 UPLOAD_FOLDER = '/tmp/uploads'
@@ -266,6 +267,121 @@ def download_file(filename):
     except TypeError:
         # For older versions that expect 'directory' parameter
         return send_from_directory(directory=os.path.join('/tmp', 'exports'), filename=filename, as_attachment=True)
+
+@app.route('/train', methods=['GET', 'POST'])
+def train():
+    # Setup static folder for upload images if it doesn't exist
+    uploads_folder = os.path.join('static', 'uploads')
+    if not os.path.exists(uploads_folder):
+        os.makedirs(uploads_folder)
+        
+    # Initialize trainer
+    trainer = ReceiptTrainer()
+    training_summary = trainer.get_training_summary()
+    
+    # Load existing examples for display
+    if os.path.exists(trainer.training_data_path):
+        training_examples = []
+        for example in trainer.training_data.get('examples', []):
+            image_path = example.get('image_path', '')
+            image_filename = os.path.basename(image_path) if image_path else ''
+            image_exists = os.path.exists(image_path) if image_path else False
+            
+            training_examples.append({
+                'item_number': example.get('item_number', ''),
+                'description': example.get('description', ''),
+                'added_at': example.get('added_at', ''),
+                'image_path': image_path,
+                'image_filename': image_filename,
+                'image_exists': image_exists
+            })
+    else:
+        training_examples = []
+    
+    # Handle POST request (training submission)
+    if request.method == 'POST':
+        if 'receipt_image' not in request.files:
+            flash('No file part in the request', 'danger')
+            return redirect(url_for('train'))
+            
+        file = request.files['receipt_image']
+        item_number = request.form.get('item_number', '')
+        description = request.form.get('description', '')
+        analyze_regions = 'analyze_regions' in request.form
+        
+        if file.filename == '':
+            flash('No file selected', 'danger')
+            return redirect(url_for('train'))
+            
+        if not item_number:
+            flash('Item number is required', 'danger')
+            return redirect(url_for('train'))
+            
+        if file and allowed_file(file.filename):
+            try:
+                # Save uploaded file
+                filename = secure_filename(file.filename)
+                timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+                filename = f"{timestamp}_{filename}"
+                file_path = os.path.join(uploads_folder, filename)
+                file.save(file_path)
+                
+                # Add to training data
+                if analyze_regions:
+                    # Full analysis with region detection
+                    analysis_result = trainer.analyze_receipt_for_training(file_path, item_number)
+                    training_result = analysis_result
+                    flash('Training data added successfully with region analysis', 'success')
+                else:
+                    # Simple example addition
+                    success = trainer.add_example(item_number, file_path, description)
+                    training_result = {
+                        'success': success,
+                        'item_number': item_number,
+                        'regions': [],
+                        'patterns': []
+                    }
+                    flash('Training data added successfully', 'success')
+                
+                # Update training summary
+                training_summary = trainer.get_training_summary()
+                
+                # Force refresh of training examples
+                training_examples = []
+                for example in trainer.training_data.get('examples', []):
+                    image_path = example.get('image_path', '')
+                    image_filename = os.path.basename(image_path) if image_path else ''
+                    image_exists = os.path.exists(image_path) if image_path else False
+                    
+                    training_examples.append({
+                        'item_number': example.get('item_number', ''),
+                        'description': example.get('description', ''),
+                        'added_at': example.get('added_at', ''),
+                        'image_path': image_path,
+                        'image_filename': image_filename,
+                        'image_exists': image_exists
+                    })
+                
+                # Return with results
+                return render_template('train.html', 
+                                     training_result=training_result,
+                                     training_summary=training_summary,
+                                     training_examples=training_examples,
+                                     receipt_image_path=file_path,
+                                     receipt_image_filename=filename)
+                                     
+            except Exception as e:
+                logging.error(f"Error in training: {str(e)}")
+                flash(f'Error processing training data: {str(e)}', 'danger')
+                return redirect(url_for('train'))
+        else:
+            flash('Invalid file type', 'danger')
+            return redirect(url_for('train'))
+    
+    # GET request - show training form
+    return render_template('train.html', 
+                         training_summary=training_summary,
+                         training_examples=training_examples)
 
 @app.route('/history')
 def export_history():

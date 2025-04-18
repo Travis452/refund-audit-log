@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Receipt OCR Trainer</title>
+    <link rel="stylesheet" href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/custom.css') }}">
+    <style>
+        .receipt-container {
+            position: relative;
+            display: inline-block;
+            margin: 20px 0;
+        }
+        .receipt-image {
+            max-width: 100%;
+            height: auto;
+            border: 2px solid var(--bs-secondary);
+            border-radius: 8px;
+        }
+        .region-highlight {
+            position: absolute;
+            border: 2px solid var(--bs-primary);
+            background-color: rgba(var(--bs-primary-rgb), 0.2);
+            pointer-events: none;
+        }
+        .training-example {
+            margin-bottom: 1.5rem;
+            border: 1px solid var(--bs-border-color);
+            border-radius: 8px;
+            padding: 1rem;
+        }
+        .training-summary {
+            background-color: rgba(var(--bs-secondary-bg-rgb), 0.4);
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg bg-body-tertiary">
+        <div class="container">
+            <a class="navbar-brand" href="/">Receipt OCR</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/">Home</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/train">Train</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/history">History</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container my-4">
+        <div class="row">
+            <div class="col-12">
+                <h1 class="mb-4">Receipt OCR Trainer</h1>
+                
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ category }} alert-dismissible fade show">
+                                {{ message }}
+                                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+                
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Train with New Receipt</h5>
+                    </div>
+                    <div class="card-body">
+                        <form action="/train" method="POST" enctype="multipart/form-data">
+                            <div class="mb-3">
+                                <label for="receiptImage" class="form-label">Upload Receipt Image</label>
+                                <input type="file" class="form-control" id="receiptImage" name="receipt_image" accept="image/*" required>
+                                <div class="form-text">Upload a clear image of the receipt.</div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="itemNumber" class="form-label">Correct Item Number</label>
+                                <input type="text" class="form-control" id="itemNumber" name="item_number" placeholder="Enter the correct item number" required>
+                                <div class="form-text">Enter the item number that should be extracted from this receipt.</div>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label for="description" class="form-label">Description (Optional)</label>
+                                <input type="text" class="form-control" id="description" name="description" placeholder="E.g., Costco receipt with membership number">
+                            </div>
+                            
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="analyzeRegions" name="analyze_regions" value="1" checked>
+                                    <label class="form-check-label" for="analyzeRegions">
+                                        Automatically analyze regions where item number appears
+                                    </label>
+                                </div>
+                            </div>
+                            
+                            <button type="submit" class="btn btn-primary">Train System</button>
+                        </form>
+                    </div>
+                </div>
+                
+                {% if training_result %}
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Training Results</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="training-summary">
+                            <h6>Summary</h6>
+                            <p><strong>Item Number:</strong> {{ training_result.item_number }}</p>
+                            <p><strong>Status:</strong> 
+                                {% if training_result.success %}
+                                <span class="badge bg-success">Success</span>
+                                {% else %}
+                                <span class="badge bg-danger">Failed</span>
+                                {% endif %}
+                            </p>
+                            {% if training_result.success %}
+                                <p><strong>Regions Analyzed:</strong> {{ training_result.regions|length }}</p>
+                                <p><strong>Patterns Found:</strong> {{ training_result.patterns|length }}</p>
+                            {% endif %}
+                        </div>
+                        
+                        {% if training_result.success and receipt_image_path %}
+                        <div class="receipt-container">
+                            <img src="{{ url_for('static', filename='uploads/' + receipt_image_filename) }}" alt="Receipt" class="receipt-image">
+                            
+                            {% for region in training_result.regions %}
+                                {% if region.contains_item_number %}
+                                <div class="region-highlight" style="
+                                    top: {{ region.relative_coords.top * 100 }}%;
+                                    left: {{ region.relative_coords.left * 100 }}%;
+                                    width: {{ region.relative_coords.width * 100 }}%;
+                                    height: {{ region.relative_coords.height * 100 }}%;">
+                                    <div class="region-label">{{ region.region }}</div>
+                                </div>
+                                {% endif %}
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                        
+                        {% if training_result.patterns %}
+                        <div class="mb-3">
+                            <h6>Patterns Detected</h6>
+                            <ul class="list-group">
+                                {% for pattern in training_result.patterns %}
+                                <li class="list-group-item">
+                                    <strong>{{ pattern.type|title }}:</strong> "{{ pattern.value }}"
+                                    <br>
+                                    <small class="text-muted">Context: {{ pattern.context }}</small>
+                                </li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+                
+                {% if training_summary %}
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Training Data Summary</h5>
+                    </div>
+                    <div class="card-body">
+                        <p><strong>Examples Collected:</strong> {{ training_summary.example_count }}</p>
+                        <p><strong>Pattern Rules:</strong> {{ training_summary.pattern_count }}</p>
+                        <p><strong>Regions of Interest:</strong> {{ training_summary.region_count }}</p>
+                        <p><strong>Last Updated:</strong> {{ training_summary.last_updated }}</p>
+                    </div>
+                </div>
+                {% endif %}
+                
+                {% if training_examples %}
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Previous Training Examples</h5>
+                    </div>
+                    <div class="card-body">
+                        {% for example in training_examples %}
+                        <div class="training-example">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <p><strong>Item Number:</strong> {{ example.item_number }}</p>
+                                    <p><strong>Description:</strong> {{ example.description }}</p>
+                                    <p><strong>Added:</strong> {{ example.added_at }}</p>
+                                </div>
+                                <div class="col-md-6">
+                                    {% if example.image_exists %}
+                                    <img src="{{ url_for('static', filename='uploads/' + example.image_filename) }}" 
+                                        alt="Training example" class="img-fluid" style="max-height: 150px;">
+                                    {% else %}
+                                    <div class="alert alert-warning">Image not available</div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

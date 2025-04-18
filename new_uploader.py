@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 # Import the various OCR methods
 from ocr_processor import process_image, extract_data_from_text, extract_item_numbers_direct, process_quick
+from trained_ocr_processor import process_with_training
 
 # Custom timeout exception
 class TimeoutException(Exception):
