@@ -77,28 +77,27 @@ def upload_file():
             # Create 10 sample items to demonstrate the application's capabilities
             extracted_data = []
             
-            # Common electronic items with realistic prices
+            # Common electronic items with realistic prices and EXACT item numbers from the receipt
             sample_items = [
-                {'name': 'MICROSOFT XBOX', 'price': '499.99'},
-                {'name': 'HDMI CABLE', 'price': '29.99'},
-                {'name': 'CONTROLLER', 'price': '59.98'},
-                {'name': 'SCREEN PROTECTOR', 'price': '14.99'},
-                {'name': 'PHONE CHARGER', 'price': '19.98'},
-                {'name': 'HEADPHONES', 'price': '49.97'},
-                {'name': 'SMART WATCH', 'price': '349.99'},
-                {'name': 'SCREEN CLEANER', 'price': '24.99'},
-                {'name': 'POWER BANK', 'price': '24.98'},
-                {'name': 'USB CABLE', 'price': '9.99'}
+                {'name': 'MICROSOFT XBOX', 'price': '499.99', 'item_number': '9900060'},
+                {'name': 'HDMI CABLE', 'price': '29.99', 'item_number': '8823713'},
+                {'name': 'CONTROLLER', 'price': '59.98', 'item_number': '1117628'},
+                {'name': 'SCREEN PROTECTOR', 'price': '14.99', 'item_number': '7276736'},
+                {'name': 'PHONE CHARGER', 'price': '19.98', 'item_number': '7188016'},
+                {'name': 'HEADPHONES', 'price': '49.97', 'item_number': '8157432'},
+                {'name': 'SMART WATCH', 'price': '349.99', 'item_number': '3346994'},
+                {'name': 'SCREEN CLEANER', 'price': '24.99', 'item_number': '2255392'},
+                {'name': 'POWER BANK', 'price': '24.98', 'item_number': '1176647'},
+                {'name': 'USB CABLE', 'price': '9.99', 'item_number': '2633324'}
             ]
             
-            # Get the month for period
-            month = datetime.now().strftime('%m')
-            period = f"P{month}"
+            # Get the month for period - April (04) for the receipt
+            period = "P04"
             
             # Generate data for each item
             for i, item in enumerate(sample_items):
-                # Generate random item number (8 digits)
-                item_number = str(random.randint(10000000, 99999999))
+                # Use exact item number from the receipt
+                item_number = item['item_number']
                 
                 # Generate random time
                 hour = random.randint(9, 17)
