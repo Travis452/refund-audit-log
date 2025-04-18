@@ -1,7 +1,7 @@
 """
-Safe uploader module that avoids pytesseract completely.
-This is a stripped-down version that focuses only on handling uploaded files
-and returning results without using OCR libraries that might cause errors.
+Safe uploader module that avoids pytesseract completely but uses AI.
+This version focuses on extracting real data using OpenAI Vision API
+and only falls back to direct processing as a last resort.
 """
 
 import os
@@ -15,7 +15,8 @@ from datetime import datetime
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Import our direct processor that doesn't use pytesseract
+# Import our AI processor and direct processor as fallback
+from ai_processor import extract_item_numbers_with_ai
 from direct_processor import direct_process
 
 # Custom timeout exception
@@ -56,13 +57,46 @@ def process_receipt_image_safe(file, app, temp_dir="/tmp"):
         signal.alarm(30)
         
         try:
-            # Process directly without OCR
+            # Try AI processing first (OpenAI Vision API)
+            try:
+                logger.info("Attempting to process with OpenAI Vision API")
+                ai_results = extract_item_numbers_with_ai(filepath)
+                
+                if ai_results and len(ai_results) > 0:
+                    logger.info(f"AI processing succeeded with {len(ai_results)} items")
+                    
+                    # Format AI results to standard format
+                    processed_data = []
+                    current_month = datetime.now().month
+                    period = f"P{current_month:02d}"
+                    
+                    for item in ai_results:
+                        item_data = {
+                            'item_number': item.get('item_number', ''),
+                            'price': item.get('price', '0.00'),
+                            'period': period,
+                            'date': item.get('date', ''),
+                            'time': item.get('time', ''),
+                            'description': item.get('description', 'AI Extracted'),
+                            'quantity': 1,
+                            'exception': ''
+                        }
+                        processed_data.append(item_data)
+                    
+                    signal.alarm(0)  # Cancel timeout
+                    return True, processed_data
+            except Exception as ai_error:
+                logger.error(f"AI processing failed: {str(ai_error)}")
+                # Continue to fallback methods
+            
+            # Fallback to direct processing if AI failed
+            logger.info("AI processing failed, falling back to direct processing")
             safe_results = direct_process(filepath)
             
             if safe_results and len(safe_results) > 0:
-                logger.info(f"Safe processing succeeded with {len(safe_results)} items")
+                logger.info(f"Direct processing succeeded with {len(safe_results)} items")
                 
-                # Format simple results to standard format
+                # Format direct results to standard format
                 processed_data = []
                 current_month = datetime.now().month
                 period = f"P{current_month:02d}"
@@ -74,9 +108,9 @@ def process_receipt_image_safe(file, app, temp_dir="/tmp"):
                         'period': period,
                         'date': item.get('date', ''),
                         'time': item.get('time', ''),
-                        'description': item.get('description', ''),
+                        'description': 'Emergency fallback - No OCR/AI data available',
                         'quantity': 1,
-                        'exception': ''
+                        'exception': 'Failed to extract with primary methods'
                     }
                     processed_data.append(item_data)
                 

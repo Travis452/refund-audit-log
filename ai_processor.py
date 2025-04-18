@@ -36,25 +36,34 @@ def extract_item_numbers_with_ai(image_path):
         # Encode the image
         base64_image = encode_image(image_path)
         
-        # Create prompt for member number extraction
+        # Create prompt for item number extraction focused on the left side
         prompt = """
         Analyze this receipt image and extract the following information:
-        1. The MEMBER NUMBER or CUSTOMER ID (the most prominent customer identifier)
-        2. The price for any items (if visible)
+        1. ITEM NUMBERS - specifically look for 7-digit numbers or product codes on the LEFT SIDE of the receipt
+        2. The price for each item (if visible)
         3. The date and time of the transaction (if visible)
         
-        Format your response as a JSON array with each item having these properties:
+        Format your response as a JSON object with an "items" array, each item having these properties:
         {
-            "item_number": "the extracted member number or customer ID",
-            "price": "the price (if available)",
-            "date": "the date of the receipt (if available)",
-            "time": "the time on the receipt (if available)"
+            "items": [
+                {
+                    "item_number": "the 7-digit product/item code from the left side",
+                    "price": "the price (if available)",
+                    "date": "the date of the receipt (if available)",
+                    "time": "the time on the receipt (if available)",
+                    "description": "briefly describe what you think this item is"
+                }
+            ]
         }
         
-        Focus specifically on finding MEMBER NUMBERS which are usually 6-12 digits.
-        Look for labels like "Member:", "Member #:", "Customer ID:", "Account:", etc.
-        The member number is usually at the top of the receipt.
-        If you can't find any member numbers, return an empty array.
+        IMPORTANT INSTRUCTIONS:
+        - Focus ONLY on the LEFT SIDE of the receipt image
+        - Look for 7-digit numbers that appear to be product codes or SKUs
+        - These numbers often appear on the left margin or left-justified on each line
+        - Ignore barcodes, total amounts, or receipt numbers
+        - If you can't find any 7-digit item numbers, return an empty array
+
+        Example item number formats to look for: 1234567, 123-4567, or other similar 7-digit codes.
         """
         
         try:
@@ -109,6 +118,7 @@ def extract_item_numbers_with_ai(image_path):
                     "price": item.get("price", ""),
                     "date": item.get("date", ""),
                     "time": item.get("time", ""),
+                    "description": item.get("description", "AI Processed"),
                     "period": "P00"  # Default period
                 }
                 
@@ -160,6 +170,7 @@ def extract_fallback(content):
             "price": prices[i] if i < len(prices) else "",
             "date": dates[0] if dates else "",
             "time": times[0] if times else "",
+            "description": "Extracted from text",
             "period": "P00"  # Default period
         }
         items.append(item_data)
