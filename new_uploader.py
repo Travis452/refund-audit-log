@@ -92,8 +92,27 @@ def process_receipt_image(file, app, temp_dir="/tmp"):
             
             if direct_results and len(direct_results) > 0:
                 logger.info(f"Direct extraction found {len(direct_results)} items")
+                
+                # Process and format the direct extraction results into our standard format
+                processed_data = []
+                current_month = int(os.popen('date +%m').read().strip())
+                period = f"P{current_month:02d}"
+                
+                for item_number in direct_results:
+                    item_data = {
+                        'item_number': item_number,
+                        'price': '0.00',
+                        'period': period,
+                        'date': '',
+                        'time': '',
+                        'description': '',
+                        'quantity': 1,
+                        'exception': ''
+                    }
+                    processed_data.append(item_data)
+                
                 signal.alarm(0)  # Cancel timeout
-                return True, direct_results
+                return True, processed_data
             
             # Next try standard OCR
             logger.info("Attempting standard OCR processing...")

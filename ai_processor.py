@@ -25,6 +25,13 @@ def extract_item_numbers_with_ai(image_path):
     """
     Use OpenAI's vision model to extract item numbers and prices from receipt.
     """
+    
+    # First check if the API key is valid and exists
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        logger.warning("No OpenAI API key found in environment variables")
+        return []
+    
     try:
         # Encode the image
         base64_image = encode_image(image_path)
@@ -49,24 +56,36 @@ def extract_item_numbers_with_ai(image_path):
         If you can't find any item numbers, return an empty array.
         """
         
-        # Call the OpenAI API
-        response = client.chat.completions.create(
-            model="gpt-4o",  # the newest OpenAI model is "gpt-4o" which was released May 13, 2024.
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
-                        }
-                    ]
-                }
-            ],
-            max_tokens=1500,
-            response_format={"type": "json_object"}
-        )
+        try:
+            # Call the OpenAI API with proper error handling
+            response = client.chat.completions.create(
+                model="gpt-4o",  # the newest OpenAI model is "gpt-4o" which was released May 13, 2024.
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
+                            }
+                        ]
+                    }
+                ],
+                max_tokens=1500,
+                response_format={"type": "json_object"}
+            )
+        except Exception as api_error:
+            # Handle API errors gracefully
+            logger.error(f"OpenAI API error: {str(api_error)}")
+            
+            # Check for quota or rate limit errors
+            error_str = str(api_error).lower()
+            if "insufficient_quota" in error_str or "rate limit" in error_str or "429" in error_str:
+                logger.warning("OpenAI API quota or rate limit exceeded")
+            
+            # Return empty list to allow fallback to traditional OCR
+            return []
         
         # Process the response
         content = response.choices[0].message.content
