@@ -16,14 +16,14 @@ def export_to_excel(data):
         ws.title = "REFUND AUDIT LOG"
         
         # Add title
-        ws.merge_cells('A1:G1')
+        ws.merge_cells('A1:E1')
         title_cell = ws['A1']
         title_cell.value = "REFUND AUDIT LOG SUMMARY"
         title_cell.font = openpyxl.styles.Font(bold=True, size=14)
         title_cell.alignment = openpyxl.styles.Alignment(horizontal='center')
         
         # Add headers - following the format in the image
-        headers = ['Item #', 'Exceptions', 'Qty', 'Total Sell', 'Period', 'Exceptions', 'Qty']
+        headers = ['Item #', 'Exceptions', 'Qty', 'Total Sell', 'Period']
         
         # Apply header styling
         header_row = 2
@@ -44,20 +44,34 @@ def export_to_excel(data):
             ws.cell(row=row_num, column=2).value = item.get('exception', '')
             
             # Quantity (use the quantity field if available, default to 1)
-            qty = int(item.get('quantity', 1))
+            # Quantity (handles AS400 '1-' format too)
+            qty_raw = str(item.get('quantity', '1')).strip()
+
+            if qty_raw.endswith('-') and qty_raw[:-1].isdigit():
+                qty = int('-' + qty_raw[:-1])
+            elif qty_raw.isdigit():
+                qty = int(qty_raw)
+            else:
+                qty = 1
+
             ws.cell(row=row_num, column=3).value = qty
+
             
             # Total Sell (Price) - If we have quantity > 1, this should be the total amount
             price_cell = ws.cell(row=row_num, column=4)
-            price_str = item.get('price', '0.00')
-            try:
-                # Try to convert to float for proper formatting
+            price_str = str(item.get('price', '0.00')).replace('Y', '').replace(',', '').strip()
+
+            if price_str.endswith('-') and price_str[:-1].replace('.', '', 1).isdigit():
+                price_val = -float(price_str[:-1])
+            elif price_str.replace('.', '', 1).isdigit():
                 price_val = float(price_str)
-                # If price is per-item and quantity > 1, calculate total
-                price_cell.value = price_val
-                price_cell.number_format = '$#,##0.00'
-            except ValueError:
-                price_cell.value = price_str
+            else:
+                price_val = 0.00
+
+            price_cell.value = price_val
+            price_cell.number_format = '$#,##0.00'
+
+
             
             # Period (use the period field if available, or extract from date)
             period = item.get('period', '')
@@ -95,9 +109,9 @@ def export_to_excel(data):
             
             # Sum the quantity columns
             qty_sum_formula = f"=SUM(C{start_row}:C{total_row-1})"
-            ws.cell(row=total_row, column=5).value = ""
-            ws.cell(row=total_row, column=6).value = ""
-            ws.cell(row=total_row, column=7).value = f"=SUM(C{start_row}:C{total_row-1})"
+            ws.cell(row=total_row, column=5).value = f"=SUM(C{start_row}:C{total_row-1})"
+            ws.cell(row=total_row, column=5).number_format = '0'
+
         
         # Auto-adjust column widths
         for i, col in enumerate(ws.columns, 1):
@@ -193,7 +207,16 @@ def export_to_google_sheets(data):
                     pass
             
             # Create row with proper format
-            qty = int(item.get('quantity', 1))
+            qty_raw = str(item.get('quantity', '1')).strip()
+
+            if qty_raw.endswith('-') and qty_raw[:-1].isdigit():
+                qty = int('-' + qty_raw[:-1])
+            elif qty_raw.isdigit():
+                qty = int(qty_raw)
+            else:
+                   qty = 1
+            
+
             row = [
                 item.get('item_number', ''),   # Item #
                 item.get('exception', ''),     # Exceptions

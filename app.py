@@ -8,13 +8,17 @@ from socket import timeout as TimeoutError
 from werkzeug.utils import secure_filename
 import json
 from datetime import datetime
+from pdf_reader import process_pdf
+from as400_parser import parse_as400_audit
+
+
+
 
 # Import from main.py where app is created
 from main import app, db
 from models import ReportItem, ExportFile
-from ocr_processor import process_image, extract_data_from_text, extract_item_numbers_direct
 from data_exporter import export_to_excel, export_to_google_sheets
-from receipt_trainer import ReceiptTrainer
+
 
 # Configure upload folder
 UPLOAD_FOLDER = '/tmp/uploads'
@@ -22,6 +26,83 @@ if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload size
+
+
+@app.route('/upload-log', methods=['POST'])
+def upload_log_file():
+    if 'file' not in request.files:
+        return jsonify({"success": False, "message": "No file uploaded"})
+
+    file = request.files['file']
+    filename = file.filename
+    ext = os.path.splitext(filename)[1].lower()
+
+    if not filename:
+        return jsonify({"success": False, "message": "Empty filename"})
+
+    session_id = str(uuid.uuid4())
+    session['session_id'] = session_id
+
+    # Save file temporarily
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    file.save(filepath)
+
+
+# Decide how to process
+    if ext == ".txt":
+    # Try AS400-style parser
+        extracted_data = parse_as400_audit(filepath)
+
+    # Fallback to tab-delimited if AS400 returns nothing
+        if not extracted_data:
+            extracted_data = process_direct(filepath)
+
+    elif ext == ".pdf":
+        extracted_data = process_pdf(filepath)
+  
+    else:
+        return jsonify({"success": False, "message": "Unsupported file type"})
+
+
+
+# Check if data is a list (AS400-style)
+    if isinstance(extracted_data, list):
+        for entry in extracted_data:
+            report_item = ReportItem(
+                session_id=session_id,
+                item_number=entry.get("Item#", ""),
+                price=entry.get("Tender $", ""),
+                period="P00",
+                exception="",
+                quantity=entry.get("Qty", "1"),
+                additional_info=entry.get("Auditor", ""),
+                original_description=entry.get("Tracking#", ""),
+                original_date=entry.get("Date", ""),
+                original_time=""
+        )
+        db.session.add(report_item)
+    else:
+    # Old format (dict of key:value pairs)
+        for key, value in extracted_data.items():
+            report_item = ReportItem(
+                session_id=session_id,
+                item_number=key,
+                price=value,
+                period="P00",
+                exception="",
+                quantity=1,
+                additional_info="Imported via log upload",
+                original_description=key,
+                original_date="",
+                original_time=""
+        )
+            db.session.add(report_item)
+
+
+    # Store in session for export
+    # Store in session for export/preview
+    session['extracted_data'] = extracted_data
+    return jsonify({"success": True, "message": "Log uploaded successfully"})
 
 # Allowed file extensions
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'tiff'}
@@ -185,6 +266,23 @@ def update_data():
 def export_data():
     export_type = request.form.get('export_type', 'excel')
     data = session.get('extracted_data', [])
+    # Normalize keys for export (handles AS400 and standard format)
+    normalized_data = []
+    for row in data:
+        if isinstance(row, dict):
+            normalized_data.append({
+            "item_number": row.get("Item#", row.get("item_number", "")),
+            "price": row.get("Tender $", row.get("price", "")),
+            "quantity": row.get("Qty", "1"),
+            "period": row.get("Period", "P00"),
+            "exception": row.get("Exceptions", row.get("exception", "")),
+            "description": row.get("Tracking#", row.get("description", "")),
+            "date": row.get("Date", row.get("date", "")),
+            "time": row.get("Time", row.get("time", "")),
+        })
+    else:
+            normalized_data.append(row)
+
     session_id = session.get('session_id')
     
     if not data:
@@ -205,7 +303,7 @@ def export_data():
         )
         
         if export_type == 'excel':
-            download_path = export_to_excel(data)
+            download_path = export_to_excel(normalized_data)
             export_file.file_path = download_path
             export_file.filename = os.path.basename(download_path)
             db.session.add(export_file)
@@ -217,7 +315,7 @@ def export_data():
             
         elif export_type == 'google':
             try:
-                spreadsheet_url = export_to_google_sheets(data)
+                spreadsheet_url = export_to_google_sheets(normalized_data)
                 export_file.sheet_url = spreadsheet_url
                 db.session.add(export_file)
                 db.session.commit()

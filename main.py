@@ -3,12 +3,14 @@ import os
 from flask import Flask
 from models import db
 
+
 # create the app
 app = Flask(__name__)
 # setup a secret key, required by sessions
 app.secret_key = os.environ.get("SESSION_SECRET", "refund_audit_log_secret_key")
 # configure the database with environment variables
-app.config["SQLALCHEMY_DATABASE_URI"] = os.environ.get("DATABASE_URL")
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///auditlog.db"
+
 app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
     "pool_recycle": 300,
     "pool_pre_ping": True,
