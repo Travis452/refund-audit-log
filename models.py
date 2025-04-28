@@ -9,6 +9,7 @@ class ReportItem(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     item_number = db.Column(db.String(50), nullable=False)
+    department = db.Column(db.String(20))
     price = db.Column(db.String(20))
     period = db.Column(db.String(5))  # P01, P02, etc.
     exception = db.Column(db.String(100))

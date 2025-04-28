@@ -23,7 +23,7 @@ def export_to_excel(data):
         title_cell.alignment = openpyxl.styles.Alignment(horizontal='center')
         
         # Add headers - following the format in the image
-        headers = ['Item #', 'Exceptions', 'Qty', 'Total Sell', 'Period']
+        headers = ['Item #','Department', 'Qty', 'Total Sell', 'Period']
         
         # Apply header styling
         header_row = 2
@@ -40,8 +40,8 @@ def export_to_excel(data):
             # Item number
             ws.cell(row=row_num, column=1).value = item.get('item_number', '')
             
-            # Exceptions (use the exception field if available)
-            ws.cell(row=row_num, column=2).value = item.get('exception', '')
+            #Department
+            ws.cell(row=row_num, column=2).value = item.get('department', '')
             
             # Quantity (use the quantity field if available, default to 1)
             # Quantity (handles AS400 '1-' format too)
@@ -89,11 +89,7 @@ def export_to_excel(data):
                         pass
             ws.cell(row=row_num, column=5).value = period
             
-            # Second Exceptions column (same as first)
-            ws.cell(row=row_num, column=6).value = item.get('exception', '')
-            
-            # Second Qty column (same as first)
-            ws.cell(row=row_num, column=7).value = qty
+
         
         # Add totals row if there is data
         if len(data) > 0:
@@ -219,12 +215,11 @@ def export_to_google_sheets(data):
 
             row = [
                 item.get('item_number', ''),   # Item #
-                item.get('exception', ''),     # Exceptions
+                
                 qty,                           # Qty
                 item.get('price', '0.00'),     # Total Sell
                 item.get('period', period),    # Period (use provided period or fallback to date-derived)
-                item.get('exception', ''),     # Exceptions (same as first)
-                qty                            # Qty (same as first)
+               
             ]
             rows.append(row)
         

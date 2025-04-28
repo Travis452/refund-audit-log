@@ -17,7 +17,7 @@ from as400_parser import parse_as400_audit
 # Import from main.py where app is created
 from main import app, db
 from models import ReportItem, ExportFile
-from data_exporter import export_to_excel, export_to_google_sheets
+from data_exporter import export_to_excel
 
 
 # Configure upload folder
