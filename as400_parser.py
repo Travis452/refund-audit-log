@@ -14,7 +14,7 @@ def parse_as400_audit(file_path):
                 "Date": line[10:18].strip(),
                 "Tracking#": line[19:32].strip(),
                 "Member#": line[33:47].strip(),
-                "Item#": line[46:55].strip(),
+                "Item#": line[47:55].strip(),
                 "Dept": line[55:59].strip(),
                 "Qty": line[59:62].strip(),
                 "Tender $": line[67:75].strip(),
