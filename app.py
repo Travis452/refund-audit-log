@@ -71,6 +71,7 @@ def upload_log_file():
             report_item = ReportItem(
                 session_id=session_id,
                 item_number=entry.get("Item#", ""),
+                department=entry.get("Dept", ""),
                 price=entry.get("Tender $", ""),
                 period="P00",
                 exception="",
@@ -79,14 +80,15 @@ def upload_log_file():
                 original_description=entry.get("Tracking#", ""),
                 original_date=entry.get("Date", ""),
                 original_time=""
-        )
-        db.session.add(report_item)
+            )
+            db.session.add(report_item)
     else:
     # Old format (dict of key:value pairs)
         for key, value in extracted_data.items():
             report_item = ReportItem(
                 session_id=session_id,
                 item_number=key,
+                department="",
                 price=value,
                 period="P00",
                 exception="",
@@ -95,10 +97,10 @@ def upload_log_file():
                 original_description=key,
                 original_date="",
                 original_time=""
-        )
+            )
             db.session.add(report_item)
 
-
+    db.session.commit()
     # Store in session for export
     # Store in session for export/preview
     session['extracted_data'] = extracted_data
@@ -273,6 +275,7 @@ def export_data():
             normalized_data.append({
             "item_number": row.get("Item#", row.get("item_number", "")),
             "price": row.get("Tender $", row.get("price", "")),
+            "department": row.get("Dept", row.get("department", "")),
             "quantity": row.get("Qty", "1"),
             "period": row.get("Period", "P00"),
             "exception": row.get("Exceptions", row.get("exception", "")),

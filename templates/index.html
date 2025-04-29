@@ -83,14 +83,7 @@
                                 
                             </div>
                             
-                                </form>
-                                <div class="mt-3">
-                                    <button id="submit-upload" class="btn btn-primary btn-lg w-100">
-                                        <i class="fas fa-upload me-2"></i>Process File
-                                    </button>
-                                </div>
-                                
-                                
+                                </form>                                
                                   <!-- Instructions -->
                              <div class="card mt-4">
                                <div class="card-header bg-dark-subtle">
@@ -118,17 +111,6 @@
                                     <li>Review the extracted data and make edits if needed</li>
                                     <li>Export the finalized data to Excel or Google Sheets</li>
                                 </ol>
-                                
-                                
-                                <div class="card bg-dark">
-                                    <div class="card-header bg-dark-subtle text-white">
-                                        <h5 class="mb-0">Sample Report Format</h5>
-                                    </div>
-                                    <div class="card-body text-center">
-                                        <img src="{{ url_for('static', filename='img/sample-report.svg') }}" alt="Sample Report" class="img-fluid sample-image">
-                                        <p class="text-muted mt-2">The application works best with reports in this format</p>
-                                    </div>
-                                </div>
                             </div>
                         </div>
                     </div>
@@ -222,7 +204,7 @@
       
         
     <!-- Custom JS -->
-    <script src="{{ url_for('static', filename='js/dropzone-config.js') }}"></script>
+    
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>
